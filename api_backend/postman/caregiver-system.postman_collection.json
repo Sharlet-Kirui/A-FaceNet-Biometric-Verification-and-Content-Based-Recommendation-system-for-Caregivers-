@@ -1,0 +1,32 @@
+{
+  "info": {
+    "_postman_id": "4378ef76-2ace-4f2e-9c93-18108e6b5f06",
+    "name": "Caregiver System API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "51501230"
+  },
+  "item": [
+    {
+      "name": "Health Check — API Backend",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": ""
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Health Check — ML Microservice",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": ""
+        }
+      },
+      "response": []
+    }
+  ]
+}
