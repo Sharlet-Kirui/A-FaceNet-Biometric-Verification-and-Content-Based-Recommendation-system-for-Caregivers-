@@ -1,13 +1,22 @@
-// Email OTP: 6 digits, stored only as a hash, 10-minute expiry, 5 attempts, single use.
-// Email sending is not wired yet: in development the code is logged to the console
-// and returned as devOtp in the API response (never when NODE_ENV=production).
+// Email OTP: 6 digits, stored only as a hash, 10-minute expiry, 5 attempts, single use,
+// and at most one new code per minute (resend cooldown). The code is emailed by
+// services/mailer.js; outside production it is also logged and returned as devOtp.
 const crypto = require('crypto');
 
 const OTP_TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
+const RESEND_COOLDOWN_SECONDS = 60;
 
 const hashCode = (caregiverId, code) =>
   crypto.createHash('sha256').update(`${caregiverId}:${code}`).digest('hex');
+
+/** Seconds until another code may be sent (0 = now). */
+async function cooldownLeft(db, caregiverId, purpose) {
+  const { rows } = await db.query(
+    `SELECT GREATEST(0, $3 - EXTRACT(EPOCH FROM (now() - max(created_at))))::int AS left
+       FROM email_otps WHERE caregiver_id = $1 AND purpose = $2`, [caregiverId, purpose, RESEND_COOLDOWN_SECONDS]);
+  return rows[0]?.left ?? 0;
+}
 
 async function issueOtp(db, caregiverId, purpose = 'email_verification') {
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
@@ -44,4 +53,4 @@ async function verifyOtp(db, caregiverId, code, purpose = 'email_verification') 
   return { ok: true };
 }
 
-module.exports = { issueOtp, verifyOtp, OTP_TTL_MINUTES };
+module.exports = { issueOtp, verifyOtp, cooldownLeft, OTP_TTL_MINUTES, RESEND_COOLDOWN_SECONDS };
