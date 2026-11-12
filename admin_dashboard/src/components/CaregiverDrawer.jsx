@@ -1,11 +1,26 @@
-import { api } from '../api/client'
+import { useState } from 'react'
+import { api, errorMessage } from '../api/client'
+import { useAuth } from '../auth/useAuth'
 import { useApi } from '../hooks/useApi'
-import { JOB_STATUS, ONBOARDING, SHIFT, SUBMISSION, date, label, pct } from '../utils/format'
+import { APPLICANT, JOB_STATUS, ONBOARDING, SHIFT, SUBMISSION, date, label, pct } from '../utils/format'
 import { Badge, Drawer, Empty, ErrorBox, Facts, Loading, Section } from './ui'
 
-export function CaregiverDrawer({ caregiverId, onClose, onOpenSubmission }) {
+export function CaregiverDrawer({ caregiverId, onClose, onOpenSubmission, onDeleted }) {
+  const { isSuperAdmin } = useAuth()
   const { data: c, error, loading, reload } = useApi(
     () => api.get(`/admin/caregivers/${caregiverId}`).then((r) => r.data), caregiverId)
+  const [deleting, setDeleting] = useState(null) // null | { reason, busy, error }
+
+  async function deleteAccount() {
+    setDeleting((d) => ({ ...d, busy: true, error: null }))
+    try {
+      await api.delete(`/admin/caregivers/${caregiverId}`, { data: { reason: deleting.reason } })
+      onDeleted?.()
+      onClose()
+    } catch (err) {
+      setDeleting((d) => ({ ...d, busy: false, error: errorMessage(err) }))
+    }
+  }
 
   const groups = {}
   for (const s of c?.skills || []) (groups[s.category] ||= []).push(s)
@@ -65,6 +80,7 @@ export function CaregiverDrawer({ caregiverId, onClose, onOpenSubmission }) {
                     <tr key={i.jobId}>
                       <td>{i.title}</td>
                       <td><Badge value={i.jobStatus}>{label(JOB_STATUS, i.jobStatus)}</Badge></td>
+                      <td><Badge value={i.applicantStatus}>{label(APPLICANT, i.applicantStatus)}</Badge></td>
                       <td className="num">{pct(i.matchScore)}% match</td>
                       <td>{date(i.interestedAt)}</td>
                     </tr>
@@ -86,6 +102,29 @@ export function CaregiverDrawer({ caregiverId, onClose, onOpenSubmission }) {
                   <strong>{w.role}</strong>, {w.employer} ({w.from_year}–{w.to_year ?? 'now'})
                 </p>
               ))}
+            </Section>
+          )}
+          {isSuperAdmin && (
+            <Section title="Delete account">
+              <p className="small muted">
+                For deletion requests under the Privacy Notice. Removes the account, documents, photos, face data,
+                reports and applications, and the uploaded files. This cannot be undone; the audit log keeps the reason.
+              </p>
+              {deleting == null ? (
+                <button className="btn danger" onClick={() => setDeleting({ reason: '', busy: false, error: null })}>Delete this account…</button>
+              ) : (
+                <div className="form">
+                  <input placeholder="Reason, e.g. Deletion requested by the caregiver by email on 14 Nov"
+                    value={deleting.reason} onChange={(e) => setDeleting({ ...deleting, reason: e.target.value })} />
+                  {deleting.error && <p className="error-text small">{deleting.error}</p>}
+                  <div className="row gap">
+                    <button className="btn" onClick={() => setDeleting(null)}>Cancel</button>
+                    <button className="btn danger" disabled={deleting.busy || deleting.reason.trim().length < 5} onClick={deleteAccount}>
+                      {deleting.busy ? 'Deleting…' : 'Delete permanently'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </Section>
           )}
         </>

@@ -107,7 +107,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue-soft);
 .table .clickable { cursor: pointer; }
 .table .clickable:hover td { background: #f3f7ff; }
 .table.stale { opacity: .6; }
-.table .actions { display: flex; gap: 6px; justify-content: flex-end; }
+.table .actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; align-items: center; }
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .toolbar { margin-bottom: 12px; }
 
@@ -191,3 +191,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue-soft);
   .grid2 { grid-template-columns: 1fr; }
   .search { width: 100%; }
 }
+
+.link-btn { border: 0; background: none; padding: 0; color: var(--blue); font-weight: 600; cursor: pointer; text-align: left; }
+.link-btn:hover { text-decoration: underline; }

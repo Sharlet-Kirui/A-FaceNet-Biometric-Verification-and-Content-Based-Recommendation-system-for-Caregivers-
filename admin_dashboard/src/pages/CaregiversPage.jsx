@@ -54,7 +54,7 @@ export function CaregiversPage() {
       )}
       {data && <Pager total={data.total} limit={LIMIT} offset={offset} onChange={setOffset} />}
       {openId && !submissionId && (
-        <CaregiverDrawer caregiverId={openId} onClose={() => setOpenId(null)} onOpenSubmission={setSubmissionId} />
+        <CaregiverDrawer caregiverId={openId} onClose={() => setOpenId(null)} onOpenSubmission={setSubmissionId} onDeleted={reload} />
       )}
       {submissionId && (
         <SubmissionDrawer submissionId={submissionId} onClose={() => setSubmissionId(null)}
