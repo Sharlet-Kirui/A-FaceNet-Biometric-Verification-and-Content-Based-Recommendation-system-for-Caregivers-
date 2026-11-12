@@ -1,0 +1,8 @@
+Recommender evaluation (same hard filters for all methods)
+Queries: 98 verified caregivers with at least one relevant job; open jobs: 100; vocabulary: 30 skills; mean relevant jobs per caregiver: 2.12
+
+Method                          P@5     P@10      MAP
+Binary cosine (main)         0.4020   0.2122   0.9600
+Weighted cosine              0.4102   0.2122   0.9868
+Keyword baseline             0.3898   0.2092   0.9476
+Ideal (upper bound)          0.4102   0.2122   1.0000
