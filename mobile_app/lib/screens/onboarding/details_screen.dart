@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/app_theme.dart';
 import '../../core/date_input.dart';
+import '../../services/api_client.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/app_date_field.dart';
 import '../../widgets/app_dropdown_field.dart';
@@ -237,9 +238,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => SpecialtiesScreen(idType: _idType)),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      _showMessage('Could not save your details. Please try again.');
+      _showMessage(friendlyError(e, 'Could not save your details. Please try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

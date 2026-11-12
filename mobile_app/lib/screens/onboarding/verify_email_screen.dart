@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/app_theme.dart';
+import '../../services/api_client.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/onboarding_app_bar.dart';
 import '../../widgets/onboarding_stepper.dart';
@@ -69,9 +70,9 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       setState(() => _error = null);
       _startTimer();
       _showMessage('A new code was sent to ${widget.email}');
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      _showMessage('Could not resend the code. Please try again.');
+      _showMessage(friendlyError(e, 'Could not resend the code. Please try again.'));
     }
   }
 
@@ -93,9 +94,18 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const DetailsScreen()),
       );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = switch (e.reason) {
+            'wrong_code' => 'Incorrect code. Check the email and try again.',
+            'expired' => 'This code has expired. Tap resend for a new one.',
+            'too_many_attempts' => 'Too many attempts. Tap resend for a new code.',
+            'no_active_code' => 'No active code. Tap resend for a new one.',
+            _ => e.message,
+          });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = 'Invalid or expired code. Try again.');
+      setState(() => _error = 'Could not verify the code. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
