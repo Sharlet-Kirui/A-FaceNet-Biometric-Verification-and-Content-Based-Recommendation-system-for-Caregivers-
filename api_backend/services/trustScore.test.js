@@ -89,3 +89,16 @@ test('unreadable or different ID text adds ocr_low and lowers the score', () => 
   assert.ok(unclear.score < clear.score);
   assert.deepEqual(unclear.failedGates, [], 'OCR is never a gate');
 });
+
+test('registry switched off: not a gate, left out of the score, and noted', () => {
+  const off = { ...DEFAULTS, iprs_enforced: 0 };
+  const r = evaluateTrust({ ...good, iprsStatus: 'mismatch' }, off);
+  assert.equal(r.decision, 'approved', 'a registry result is ignored while switched off');
+  assert.ok(r.reasons.includes('iprs_not_checked'));
+  assert.equal(r.components.iprs, null);
+  // face 0.5, OCR 0.2 renormalised over 0.7
+  const expected = Math.round(((0.5 * r.components.face + 0.2 * r.components.ocr) / 0.7) * 1000) / 1000;
+  assert.equal(r.score, expected);
+  // other gates still apply
+  assert.equal(evaluateTrust({ ...good, faceDistance: 1.3 }, off).decision, 'flagged');
+});

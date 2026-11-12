@@ -35,6 +35,7 @@ app.use('/auth', require('./routes/auth'));
 app.use('/', require('./routes/caregivers'));
 app.use('/kyc', require('./routes/kyc'));
 app.use('/recommendations', require('./routes/recommendations'));
+app.use('/notifications', require('./routes/notifications'));
 app.use('/admin', require('./routes/admin'));
 
 app.use((req, res) => res.status(404).json({ error: `No route for ${req.method} ${req.path}` }));

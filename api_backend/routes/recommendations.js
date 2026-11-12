@@ -1,4 +1,4 @@
-// /recommendations: ranked job matches, express interest, my interests (caregiver JWT).
+// /recommendations: ranked job matches, express interest, my applications, ways to get more matches (caregiver JWT).
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
@@ -29,8 +29,8 @@ router.get('/', requireAuth, wrap(async (req, res) => {
 // GET /recommendations/interests  (defined before /:jobId routes)
 router.get('/interests', requireAuth, wrap(async (req, res) => {
   const { rows } = await db.query(
-    `SELECT job_id, match_score, reasons, matched_at FROM job_matches
-      WHERE caregiver_id = $1 AND status = 'interested' ORDER BY matched_at DESC`, [req.caregiverId]);
+    `SELECT job_id, match_score, reasons, matched_at, status FROM job_matches
+      WHERE caregiver_id = $1 AND status IN ('interested', 'shortlisted', 'declined') ORDER BY matched_at DESC`, [req.caregiverId]);
   const vocab = await rec.loadVocabulary(db);
   const caregiver = await rec.loadCaregiver(db, req.caregiverId);
   const interests = [];
@@ -39,10 +39,45 @@ router.get('/interests', requireAuth, wrap(async (req, res) => {
     if (!job) continue;
     // re-scored so held/missing skills reflect the caregiver's current profile
     const m = rec.scoreJob(caregiver, job, vocab, { ignoreFilters: true });
-    interests.push({ ...rec.present({ ...m, score: Number(r.match_score) }, 'interested'),
+    // status: interested (waiting), shortlisted or declined (set by an administrator)
+    interests.push({ ...rec.present({ ...m, score: Number(r.match_score) }, r.status),
       jobStatus: job.status, interestedAt: r.matched_at });
   }
   res.json({ count: interests.length, interests });
+}));
+
+// GET /recommendations/insights  -> concrete ways to reach more jobs ("Room to grow")
+//   skills:  skills most often required by open jobs in the caregiver's county that they do not list
+//   shifts:  open jobs in the county on shifts the caregiver has not made themselves available for
+//   experience: open jobs in the county that need more years than they have
+router.get('/insights', requireAuth, wrap(async (req, res) => {
+  const caregiver = await rec.loadCaregiver(db, req.caregiverId);
+  if (!caregiver) return res.status(404).json({ error: 'Caregiver not found' });
+  const vocab = await rec.loadVocabulary(db);
+  const county = (j) => String(j.county).trim().toLowerCase() === String(caregiver.county || '').trim().toLowerCase();
+  const local = (await rec.loadOpenJobs(db)).filter(county);
+  const held = new Set(caregiver.skills.map((s) => s.skill_tag_id));
+  const exp = Number(caregiver.experience_years ?? 0);
+
+  const skillCounts = new Map();
+  const shiftCounts = new Map();
+  let needMoreExperience = 0;
+  for (const j of local) {
+    if (exp < Number(j.min_experience_years)) { needMoreExperience++; continue; }
+    if (!caregiver.shifts.has(j.shift)) { shiftCounts.set(j.shift, (shiftCounts.get(j.shift) || 0) + 1); continue; }
+    for (const r of j.requirements) {
+      if (!held.has(r.skill_tag_id)) skillCounts.set(r.skill_tag_id, (skillCounts.get(r.skill_tag_id) || 0) + 1);
+    }
+  }
+  const top = (map, n) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+  res.json({
+    county: caregiver.county,
+    openJobsInCounty: local.length,
+    skills: top(skillCounts, 3).map(([id, jobs]) => ({ skill: vocab.byId.get(id)?.skill_name ?? id,
+      category: vocab.byId.get(id)?.category, jobs })),
+    shifts: top(shiftCounts, 3).map(([shift, jobs]) => ({ shift, jobs })),
+    needMoreExperience,
+  });
 }));
 
 // POST /recommendations/:jobId/interest
@@ -64,7 +99,9 @@ router.post('/:jobId/interest', requireAuth, wrap(async (req, res) => {
   await db.query(
     `INSERT INTO job_matches (caregiver_id, job_id, match_score, reasons, status)
      VALUES ($1, $2, $3, $4, 'interested')
-     ON CONFLICT (caregiver_id, job_id) DO UPDATE SET status = 'interested', matched_at = now()`,
+     ON CONFLICT (caregiver_id, job_id) DO UPDATE
+       SET status = CASE WHEN job_matches.status IN ('shortlisted', 'declined') THEN job_matches.status ELSE 'interested' END,
+           matched_at = CASE WHEN job_matches.status IN ('shortlisted', 'declined') THEN job_matches.matched_at ELSE now() END`,
     [req.caregiverId, job.job_id, m.score,
       JSON.stringify({ method: 'binary', reasons: m.reasons, held: m.held, missing: m.missing })]);
   res.status(201).json({ ...rec.present(m, 'interested'), message: 'Interest recorded. The family or agency will contact you if shortlisted.' });
