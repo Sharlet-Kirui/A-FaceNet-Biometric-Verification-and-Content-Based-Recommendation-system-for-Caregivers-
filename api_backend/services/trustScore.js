@@ -6,7 +6,8 @@
  *     - both images pass the blur check (Laplacian variance)
  *     - liveness passed
  *     - face distance is below the FaceNet threshold (stops a stolen but genuine ID)
- *     - IPRS is not a mismatch, and is available
+ *     - IPRS is not a mismatch, and is available (only while iprs_enforced = 1; when 0 the
+ *       registry is not consulted, left out of the score and noted as iprs_not_checked)
  *
  *   Score (0-1) = w_face * face + w_ocr * ocr + w_iprs * iprs
  *     face = clamp(1 - d / (2 * tau), 0, 1)   -> the threshold tau maps to 0.5
@@ -33,6 +34,7 @@ const DEFAULTS = Object.freeze({
   liveness_same_person_threshold: 1.25,
   liveness_nonce_ttl_seconds: 120,
   liveness_enforced: 1,
+  iprs_enforced: 1,
 });
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -85,13 +87,15 @@ function evaluateTrust(checks, settings = DEFAULTS) {
     failedGates.push('liveness_failed');
   }
   if (!(checks.faceDistance < s.face_distance_threshold)) failedGates.push('face_mismatch');
-  if (checks.iprsStatus === 'mismatch') failedGates.push('iprs_mismatch');
+  const iprsUsed = Boolean(s.iprs_enforced);
+  if (!iprsUsed) notes.push('iprs_not_checked');
+  else if (checks.iprsStatus === 'mismatch') failedGates.push('iprs_mismatch');
   else if (checks.iprsStatus !== 'verified') failedGates.push('iprs_unavailable');
 
   const components = {
     face: round3(faceScore(checks.faceDistance, s.face_distance_threshold)),
     ocr: checks.ocrScore == null ? null : round3(clamp01(checks.ocrScore)),
-    iprs: iprsScore(checks.iprsStatus),
+    iprs: iprsUsed ? iprsScore(checks.iprsStatus) : null,
   };
 
   const wOcr = components.ocr == null ? 0 : s.weight_ocr;
@@ -99,10 +103,11 @@ function evaluateTrust(checks, settings = DEFAULTS) {
   // Not a gate: tells the caregiver to upload a clearer ID photo when the
   // number or name could not be read (the score itself already reflects it)
   else if (components.ocr < OCR_LOW) notes.push('ocr_low');
-  const wSum = s.weight_face + wOcr + s.weight_iprs;
+  const wIprs = components.iprs == null ? 0 : s.weight_iprs;
+  const wSum = s.weight_face + wOcr + wIprs;
   if (!(wSum > 0)) throw new Error('Trust weights must sum to more than 0');
   const score = round3(
-    (s.weight_face * components.face + wOcr * (components.ocr ?? 0) + s.weight_iprs * components.iprs) / wSum
+    (s.weight_face * components.face + wOcr * (components.ocr ?? 0) + wIprs * (components.iprs ?? 0)) / wSum
   );
 
   const approved = failedGates.length === 0 && score >= s.trust_threshold;
