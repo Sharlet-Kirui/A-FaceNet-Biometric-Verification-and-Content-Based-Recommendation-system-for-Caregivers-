@@ -31,6 +31,8 @@ export const ONBOARDING_ORDER = Object.keys(ONBOARDING)
 export const SUBMISSION = { pending: 'Pending', processing: 'Processing', flagged: 'Needs review', approved: 'Approved', rejected: 'Rejected' }
 export const JOB_STATUS = { draft: 'Draft', open: 'Open', filled: 'Filled', closed: 'Closed' }
 export const JOB_TYPE = { full_time: 'Full-time', part_time: 'Part-time', live_in: 'Live-in', temporary: 'Temporary' }
+export const APPLICANT = { interested: 'Waiting', shortlisted: 'Shortlisted', declined: 'Declined' }
+
 export const SHIFT = { morning: 'Morning', afternoon: 'Afternoon', night: 'Night', live_in: 'Live-in' }
 
 export const DOC_TYPE = {
@@ -52,6 +54,7 @@ export const REASON = {
   iprs_mismatch: 'Details do not match the registry',
   iprs_unavailable: 'Registry could not be reached',
   ocr_not_run: 'OCR did not run (left out of the score)',
+  iprs_not_checked: 'Registry check switched off (left out of the score)',
   ocr_low: 'ID text barely matches the typed details',
   score_below_threshold: 'Trust score below the approval threshold',
 }
@@ -61,6 +64,8 @@ export const ACTION = {
   job_created: 'Job created', job_updated: 'Job updated', job_status_changed: 'Job status changed',
   category_created: 'Category created', category_updated: 'Category updated', category_deleted: 'Category deleted',
   settings_updated: 'Settings changed',
+  applicant_shortlisted: 'Applicant shortlisted', applicant_declined: 'Applicant declined',
+  applicant_interested: 'Applicant moved back to waiting', caregiver_deleted: 'Caregiver account deleted',
 }
 
 export const SETTING = {
@@ -69,4 +74,5 @@ export const SETTING = {
   blur_threshold: 'Minimum sharpness (blur)', liveness_min_turn_ratio: 'Liveness: minimum head turn',
   liveness_same_person_threshold: 'Liveness: same-person distance', liveness_nonce_ttl_seconds: 'Liveness: challenge time (s)',
   liveness_enforced: 'Liveness required (1 = yes)',
+  iprs_enforced: 'Registry check required (1 = yes)',
 }

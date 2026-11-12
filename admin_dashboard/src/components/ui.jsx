@@ -2,7 +2,7 @@
 import { useEffect } from 'react'
 
 const BADGE_TONE = {
-  verified: 'green', approved: 'green', open: 'green', true: 'green',
+  verified: 'green', approved: 'green', open: 'green', true: 'green', shortlisted: 'green', interested: 'amber', declined: 'grey',
   flagged: 'amber', under_review: 'amber', pending: 'amber', processing: 'amber', draft: 'grey',
   rejected: 'red', closed: 'grey', filled: 'blue', false: 'grey',
 }

@@ -15,6 +15,12 @@ function summary(log) {
     case 'admin_approve':
     case 'admin_reject':
       return `${d.automaticDecision ? `system said ${d.automaticDecision}` : ''}${d.reason ? ` · “${d.reason}”` : ''}`
+    case 'applicant_shortlisted':
+    case 'applicant_declined':
+    case 'applicant_interested':
+      return `${d.title || ''}${d.previousStatus ? ` · was ${d.previousStatus}` : ''}`
+    case 'caregiver_deleted':
+      return `“${d.reason || ''}”`
     case 'settings_updated':
       return Object.entries(d.changed || {}).map(([k, v]) => `${k}: ${v.from} → ${v.to}`).join(', ')
     default:
