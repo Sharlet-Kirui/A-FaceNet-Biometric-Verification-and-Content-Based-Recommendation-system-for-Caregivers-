@@ -15,6 +15,8 @@ function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Missing bearer token' });
   try {
     const payload = jwt.verify(token, secret());
+    // admin tokens are not caregiver tokens (see middleware/adminAuth.js)
+    if (payload.role !== 'caregiver') return res.status(401).json({ error: 'Caregiver token required' });
     req.caregiverId = payload.sub;
     return next();
   } catch {
