@@ -283,25 +283,56 @@ async function main() {
         }
 
         if (status === 'verified' || status === 'rejected' || status === 'under_review') {
-          const good = status === 'verified';
+          // Synthetic raw check results, then the SAME trust module the API uses.
           const f = (lo, hi) => Number(faker.number.float({ min: lo, max: hi }).toFixed(3));
-          const match = good ? f(0.82, 0.99) : status === 'rejected' ? f(0.25, 0.60) : f(0.60, 0.80);
-          const live = good ? f(0.85, 1) : status === 'rejected' ? f(0.2, 0.7) : f(0.6, 0.85);
-          const ocr = good ? f(0.8, 0.98) : f(0.4, 0.8);
+          const tau = settings.face_distance_threshold;
+          let checks;
+          if (status === 'verified') {
+            checks = { faceDistance: f(0.30, 0.80), ocrScore: f(0.85, 0.99), iprsStatus: 'verified', livenessPassed: true };
+          } else if (status === 'under_review') {
+            // borderline: weak face match / weak OCR, or IPRS unavailable
+            checks = faker.number.float({ min: 0, max: 1 }) < 0.5
+              ? { faceDistance: f(0.90, tau - 0.02), ocrScore: f(0.50, 0.75), iprsStatus: 'verified', livenessPassed: true }
+              : { faceDistance: f(0.40, 0.90), ocrScore: f(0.70, 0.95), iprsStatus: 'unavailable', livenessPassed: true };
+          } else {
+            // flagged then rejected by an admin: face mismatch, IPRS mismatch, or failed liveness
+            const kind = pick(['face', 'iprs', 'liveness']);
+            checks = {
+              faceDistance: kind === 'face' ? f(tau + 0.05, 1.6) : f(0.40, 0.90),
+              ocrScore: f(0.60, 0.95),
+              iprsStatus: kind === 'iprs' ? 'mismatch' : 'verified',
+              livenessPassed: kind !== 'liveness',
+            };
+          }
+          Object.assign(checks, {
+            faceDetectedId: true, faceDetectedSelfie: true,
+            blurId: between(120, 600), blurSelfie: between(120, 600),
+          });
+          const result = evaluateTrust(checks, settings);
+          const expected = status === 'verified' ? 'approved' : 'flagged';
+          if (result.decision !== expected) decisionMismatches++;
+
           const det = f(0.9, 1);
-          const overall = Number((0.4 * match + 0.25 * live + 0.2 * ocr + 0.15 * det).toFixed(3));
+          const live = checks.livenessPassed ? f(0.8, 1) : f(0.1, 0.45);
+          const turnRatio = checks.livenessPassed ? f(0.28, 0.55) : f(0.0, 0.15);
           const rep = await q(
             `INSERT INTO verification_reports (submission_id,face_detection_score,facenet_distance,facenet_match_score,
-               ocr_score,liveness_score,iprs_verification_status,overall_confidence,report_details)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING report_id`,
-            [subId, det, Number((1.2 * (1 - match)).toFixed(4)), match, ocr, live,
-              good ? 'verified' : status === 'rejected' ? 'mismatch' : 'unavailable', overall,
-              JSON.stringify({ seeded: true, challenge })]);
+               ocr_score,liveness_score,iprs_verification_status,overall_confidence,report_details,status)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING report_id`,
+            [subId, det, checks.faceDistance, result.components.face, checks.ocrScore, live,
+              checks.iprsStatus, result.score,
+              JSON.stringify({
+                seeded: true, challenge, turnRatio, blurId: checks.blurId, blurSelfie: checks.blurSelfie,
+                decision: result.decision, failedGates: result.failedGates, reasons: result.reasons,
+                components: result.components, weights: result.weights, threshold: result.threshold,
+              }),
+              status === 'verified' ? 'generated' : 'reviewed']);
+          const verified = status === 'verified';
           await q(
             `INSERT INTO trust_scores (report_id,caregiver_id,score,is_verified,badge_issued_at,valid_until)
              VALUES ($1,$2,$3,$4,$5,$6)`,
-            [rep.rows[0].report_id, id, overall, good, good ? createdAt : null,
-              good ? new Date(createdAt.getTime() + 365 * 864e5) : null]);
+            [rep.rows[0].report_id, id, result.score, verified, verified ? createdAt : null,
+              verified ? new Date(createdAt.getTime() + 365 * 864e5) : null]);
         }
       }
 
