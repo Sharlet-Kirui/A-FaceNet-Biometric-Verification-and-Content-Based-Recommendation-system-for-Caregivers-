@@ -221,7 +221,7 @@ class JobCard extends StatelessWidget {
                       style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary)),
                 ),
                 if (job.isInterested)
-                  const SkillChip('Interest sent', green: true)
+                  SkillChip(job.applicationLabel, green: !job.isDeclined, missing: job.isDeclined)
                 else if (onToggleSave != null)
                   IconButton(
                     onPressed: onToggleSave,
@@ -257,7 +257,7 @@ class JobCard extends StatelessWidget {
                           backgroundColor: AppColors.primary,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                        child: Text(job.isInterested ? 'Interest Sent' : 'Express Interest'),
+                        child: Text(job.isInterested ? job.applicationLabel : 'Express Interest'),
                       ),
                     ),
                 ],

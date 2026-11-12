@@ -102,7 +102,17 @@ class JobMatch {
 
   JobMatch withStatus(String newStatus) => JobMatch.fromJson({...toJson(), 'status': newStatus});
 
-  bool get isInterested => status == 'interested';
+  /// The caregiver has expressed interest (whatever the outcome so far).
+  bool get isInterested => const {'interested', 'shortlisted', 'declined'}.contains(status);
+  bool get isShortlisted => status == 'shortlisted';
+  bool get isDeclined => status == 'declined';
+
+  /// Short label for the application's state, for chips and badges.
+  String get applicationLabel => switch (status) {
+        'shortlisted' => 'Shortlisted',
+        'declined' => 'Not selected',
+        _ => 'Interest sent',
+      };
   bool get isOpen => jobStatus == 'open';
 
   String get place => [if (locationDetail != null && locationDetail!.isNotEmpty) locationDetail!, county]
@@ -148,9 +158,17 @@ String money(int n) {
 String ago(DateTime? t, {required String prefix}) {
   if (t == null) return '';
   final d = DateTime.now().difference(t);
-  if (d.inDays >= 1) return '$prefix ${d.inDays} day${d.inDays == 1 ? '' : 's'} ago';
-  if (d.inHours >= 1) return '$prefix ${d.inHours} hour${d.inHours == 1 ? '' : 's'} ago';
-  return '$prefix just now';
+  final String when;
+  if (d.inDays >= 1) {
+    when = '${d.inDays} day${d.inDays == 1 ? '' : 's'} ago';
+  } else if (d.inHours >= 1) {
+    when = '${d.inHours} hour${d.inHours == 1 ? '' : 's'} ago';
+  } else if (d.inMinutes >= 1) {
+    when = '${d.inMinutes} min ago';
+  } else {
+    when = 'just now';
+  }
+  return '$prefix $when'.trim();
 }
 
 class ProfileSkill {
@@ -219,5 +237,60 @@ class CaregiverProfile {
   String get initials =>
       [firstName, lastName].where((s) => s.isNotEmpty).map((s) => s[0].toUpperCase()).join();
   int? get trustScore100 => trustScore == null ? null : (trustScore! * 100).round();
-    String get place => [if (town != null && town!.isNotEmpty) town!, ?county].join(', ');
+  String get place => [if (town != null && town!.isNotEmpty) town!, ?county].join(', ');
+}
+
+class AppNotification {
+  final String id;
+  final String type;
+  final String title;
+  final String body;
+  final bool read;
+  final DateTime? createdAt;
+  final String? jobId;
+
+  const AppNotification({required this.id, required this.type, required this.title, this.body = '',
+      this.read = false, this.createdAt, this.jobId});
+
+  factory AppNotification.fromJson(Map<String, dynamic> j) => AppNotification(
+        id: j['id'] as String,
+        type: (j['type'] as String?) ?? '',
+        title: (j['title'] as String?) ?? '',
+        body: (j['body'] as String?) ?? '',
+        read: j['read'] == true,
+        createdAt: _toDate(j['createdAt']),
+        jobId: (j['data'] is Map) ? (j['data'] as Map)['jobId'] as String? : null,
+      );
+}
+
+class NotificationFeed {
+  final int unread;
+  final List<AppNotification> items;
+  const NotificationFeed(this.unread, this.items);
+}
+
+/// GET /recommendations/insights: concrete ways to reach more jobs in the caregiver's county.
+class MatchInsights {
+  final int openJobsInCounty;
+  final List<({String skill, int jobs})> skills;
+  final List<({String shift, int jobs})> shifts;
+  final int needMoreExperience;
+
+  const MatchInsights({this.openJobsInCounty = 0, this.skills = const [], this.shifts = const [],
+      this.needMoreExperience = 0});
+
+  factory MatchInsights.fromJson(Map<String, dynamic> j) => MatchInsights(
+        openJobsInCounty: _toInt(j['openJobsInCounty']) ?? 0,
+        skills: [
+          for (final s in (j['skills'] as List? ?? const []))
+            if (s is Map) (skill: '${s['skill']}', jobs: _toInt(s['jobs']) ?? 0),
+        ],
+        shifts: [
+          for (final s in (j['shifts'] as List? ?? const []))
+            if (s is Map) (shift: '${s['shift']}', jobs: _toInt(s['jobs']) ?? 0),
+        ],
+        needMoreExperience: _toInt(j['needMoreExperience']) ?? 0,
+      );
+
+  bool get isEmpty => skills.isEmpty && shifts.isEmpty && needMoreExperience == 0;
 }

@@ -21,6 +21,12 @@ abstract class JobsService {
   Future<List<JobMatch>> savedJobs();
   Future<bool> toggleSaved(JobMatch job);
 
+  Future<NotificationFeed> notifications();
+  Future<void> markNotificationsRead();
+
+  /// Ways to get more matches ("Room to grow").
+  Future<MatchInsights> insights();
+
   /// Bumped whenever interest or saved jobs change, so open tabs reload.
   final ValueNotifier<int> changes = ValueNotifier(0);
 }
@@ -67,6 +73,23 @@ class ApiJobsService extends JobsService {
     }
     return CaregiverProfile.fromJson(me, kyc);
   }
+
+  @override
+  Future<NotificationFeed> notifications() async {
+    final body = await _api.get('/notifications');
+    return NotificationFeed(
+      (body['unread'] as num?)?.toInt() ?? 0,
+      [for (final n in (body['notifications'] as List? ?? const [])) AppNotification.fromJson(n as Map<String, dynamic>)],
+    );
+  }
+
+  @override
+  Future<void> markNotificationsRead() async {
+    await _api.post('/notifications/read', {});
+  }
+
+  @override
+  Future<MatchInsights> insights() async => MatchInsights.fromJson(await _api.get('/recommendations/insights'));
 
   Future<Map<String, Map<String, dynamic>>> _readSaved() async {
     final raw = await _api.read(_savedKey);
@@ -178,6 +201,23 @@ class MockJobsService extends JobsService {
 
   @override
   Future<List<JobMatch>> savedJobs() async => _saved.values.toList();
+
+  @override
+  Future<NotificationFeed> notifications() async => NotificationFeed(1, [
+        AppNotification(id: 'n1', type: 'verification_approved', title: 'You are verified',
+            body: 'Your job matches are ready on the Home screen.', createdAt: DateTime.now()),
+      ]);
+
+  @override
+  Future<void> markNotificationsRead() async {}
+
+  @override
+  Future<MatchInsights> insights() async => const MatchInsights(
+        openJobsInCounty: 17,
+        skills: [(skill: 'Medication Administration', jobs: 6), (skill: 'Wound Dressing', jobs: 4)],
+        shifts: [(shift: 'night', jobs: 5)],
+        needMoreExperience: 2,
+      );
 
   @override
   Future<bool> toggleSaved(JobMatch job) async {

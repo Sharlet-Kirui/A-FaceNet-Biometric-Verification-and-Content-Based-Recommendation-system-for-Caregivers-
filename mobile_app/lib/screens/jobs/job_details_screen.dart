@@ -161,7 +161,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
           child: PrimaryButton(
-            label: job.isInterested ? 'Interest Sent' : 'Express Interest',
+            label: job.isInterested ? job.applicationLabel : 'Express Interest',
             leadingIcon: job.isInterested ? Icons.check : Icons.send_outlined,
             isLoading: _sending,
             color: job.isInterested ? AppColors.success : AppColors.primaryDark,

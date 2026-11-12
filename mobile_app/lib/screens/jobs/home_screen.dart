@@ -8,6 +8,7 @@ import '../../widgets/job_widgets.dart';
 import '../onboarding/verification_status_screen.dart';
 import 'job_actions.dart';
 import 'main_shell.dart';
+import 'notifications_screen.dart';
 
 /// Welcome, match summary and the top three matches.
 class HomeScreen extends StatefulWidget {
@@ -20,6 +21,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   CaregiverProfile? _profile;
   List<JobMatch> _matches = const [];
+  MatchInsights? _insights;
+  int _unread = 0;
   ApiException? _error;
   bool _loading = true;
 
@@ -44,11 +47,19 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final profile = await jobsService.profile();
       final matches = await jobsService.recommendations(limit: 10);
+      MatchInsights? insights;
+      try {
+        insights = await jobsService.insights();
+      } catch (_) {
+        // tips are optional; matches still show
+      }
       if (!mounted) return;
       setState(() {
         _profile = profile;
         _matches = matches;
+        _insights = insights;
       });
+      _loadUnread();
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e);
     } catch (_) {
@@ -56,6 +67,20 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadUnread() async {
+    try {
+      final feed = await jobsService.notifications();
+      if (mounted) setState(() => _unread = feed.unread);
+    } catch (_) {
+      // the bell simply shows no count
+    }
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    _loadUnread();
   }
 
   Future<void> _interest(JobMatch job) async {
@@ -72,6 +97,17 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: AppColors.background,
         title: const Text('Jobs Matched to Your Skills',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.primaryDark)),
+        actions: [
+          IconButton(
+            tooltip: 'Notifications',
+            onPressed: _openNotifications,
+            icon: Badge(
+              isLabelVisible: _unread > 0,
+              label: Text('$_unread'),
+              child: const Icon(Icons.notifications_none, color: AppColors.primaryDark),
+            ),
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _load,
@@ -86,6 +122,10 @@ class _HomeScreenState extends State<HomeScreen> {
               _welcome(),
               const SizedBox(height: 16),
               _summary(),
+              if (_insights != null && !_insights!.isEmpty) ...[
+                const SizedBox(height: 16),
+                _growth(_insights!),
+              ],
               const SizedBox(height: 22),
               Row(
                 children: [
@@ -154,7 +194,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ? 'Great match potential!'
         : best >= 40
             ? 'Good match potential'
-            : 'Room to grow';
+            : 'Few close matches yet';
     return AppCard(
       padding: EdgeInsets.zero,
       child: Column(
@@ -213,6 +253,60 @@ class _HomeScreenState extends State<HomeScreen> {
           TextButton(
             onPressed: () => MainShell.switchTab(context, MainShell.profile),
             child: const Text('View Profile'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static const _shiftNames = {'morning': 'morning', 'afternoon': 'afternoon', 'night': 'night', 'live_in': 'live-in'};
+
+  /// "Room to grow" made concrete: what would bring more jobs, from GET /recommendations/insights.
+  Widget _growth(MatchInsights i) {
+    final tips = <(IconData, String)>[
+      if (i.skills.isNotEmpty)
+        (
+          Icons.school_outlined,
+          'Skills families near you ask for: ${i.skills.map((s) => '${s.skill} (${s.jobs} job${s.jobs == 1 ? '' : 's'})').join(', ')}. '
+              'If you have them, add them to your profile; if not, a short course would open these jobs.',
+        ),
+      for (final s in i.shifts)
+        (
+          Icons.schedule,
+          '${s.jobs} open job${s.jobs == 1 ? '' : 's'} in your county ${s.jobs == 1 ? 'is a' : 'are'} '
+              '${_shiftNames[s.shift] ?? s.shift} shift${s.jobs == 1 ? '' : 's'}. Adding that availability would show them to you.',
+        ),
+      if (i.needMoreExperience > 0)
+        (
+          Icons.trending_up,
+          '${i.needMoreExperience} job${i.needMoreExperience == 1 ? ' needs' : 's need'} more years of experience than you have. '
+              'Make sure all your past caregiving work is listed.',
+        ),
+    ];
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(Icons.lightbulb_outline, 'Ways to get more matches'),
+          for (final (icon, text) in tips)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 20, color: AppColors.primary),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(text, style: const TextStyle(fontSize: 14, height: 1.4, color: AppColors.textDark))),
+                ],
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => MainShell.switchTab(context, MainShell.profile),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Update my profile'),
+            ),
           ),
         ],
       ),
