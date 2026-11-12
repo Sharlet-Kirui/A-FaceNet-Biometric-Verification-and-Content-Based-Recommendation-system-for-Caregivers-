@@ -8,6 +8,7 @@ import '../../services/models.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/primary_button.dart';
 import '../auth/login_screen.dart';
+import '../jobs/main_shell.dart';
 import 'details_screen.dart';
 import 'kyc_screen.dart';
 import 'selfie_screen.dart';
@@ -245,11 +246,10 @@ class _VerificationStatusScreenState extends State<VerificationStatusScreen> {
                   PrimaryButton(
                     label: 'View Matched Jobs',
                     trailingIcon: Icons.arrow_forward,
-                    onPressed: () {
-                      // The job feed is built in the recommendation module.
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text('Job matches are coming next.')));
-                    },
+                    onPressed: () => Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const MainShell()),
+                      (_) => false,
+                    ),
                   )
                 else if (r != null && r.isRejected)
                   PrimaryButton(
