@@ -27,6 +27,8 @@ req('dotenv').config({ path: path.resolve(__dirname, '../../api_backend/.env') }
 const { Client } = req('pg');
 const { faker } = req('@faker-js/faker');
 const bcrypt = req('bcryptjs');
+// Same trust decision code the API uses (gates + weights from system_settings)
+const { evaluateTrust, loadSettings, DEFAULTS } = require(path.resolve(__dirname, '../../api_backend/services/trustScore.js'));
 
 const N_CAREGIVERS = 200;
 const N_JOBS = 100;
@@ -131,6 +133,15 @@ async function main() {
   const q = (text, params) => db.query(text, params);
 
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 8);
+
+  let settings;
+  try {
+    settings = await loadSettings(db);
+  } catch (e) {
+    settings = { ...DEFAULTS };
+    console.warn('system_settings not found (run migration 6) - using default weights and thresholds');
+  }
+  let decisionMismatches = 0;
 
   try {
     await q('BEGIN');
@@ -404,6 +415,7 @@ async function main() {
     const avgRel = Object.values(groundTruth).reduce((a, g) => a + g.relevant.length, 0) / jobCount;
     console.log(`ground_truth.json written (avg ${avgRel.toFixed(1)} relevant caregivers per job).`);
     console.log(`All seeded logins use password: ${DEV_PASSWORD}`);
+    console.log(`Trust weights face/ocr/iprs = ${settings.weight_face}/${settings.weight_ocr}/${settings.weight_iprs}, threshold ${settings.trust_threshold}; decision mismatches: ${decisionMismatches}`);
   } catch (err) {
     await q('ROLLBACK').catch(() => {});
     throw err;
