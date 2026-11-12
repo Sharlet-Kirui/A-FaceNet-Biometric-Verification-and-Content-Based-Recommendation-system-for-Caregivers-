@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_theme.dart';
+import '../../services/api_client.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/onboarding_app_bar.dart';
 import '../../widgets/onboarding_stepper.dart';
@@ -44,6 +45,37 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
   final _langs = _Group(['Swahili', 'English']);
   final _avail = _Group(['Live-in', 'Day-shift', 'Night-shift']);
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOptions();
+  }
+
+  /// Uses the platform's skill vocabulary so the caregiver's choices match the
+  /// skills jobs ask for. Keeps the built-in lists if the server is unreachable.
+  Future<void> _loadOptions() async {
+    try {
+      final options = await onboardingService.loadSkillOptions();
+      if (!mounted) return;
+      setState(() {
+        _replace(_specs, options['specialization']);
+        _replace(_skills, options['technical']);
+        _replace(_langs, options['language']);
+      });
+    } catch (_) {
+      // offline: the built-in lists stay, and the API maps them on save
+    }
+  }
+
+  void _replace(_Group g, List<String>? names) {
+    if (names == null || names.isEmpty) return;
+    g.options
+      ..clear()
+      ..addAll(names)
+      ..addAll(g.custom);
+    g.selected.retainAll(g.options);
+  }
 
   void _toggle(_Group g, String value) {
     setState(() =>
@@ -101,9 +133,9 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => KycScreen(idType: widget.idType)),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      _showMessage('Could not save your specialties. Please try again.');
+      _showMessage(friendlyError(e, 'Could not save your specialties. Please try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -178,8 +210,8 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Build your Skill Vector to help families find the '
-                      'perfect match for their specific needs.',
+                      'Add your skills so families can find the right '
+                      'match for their needs.',
                       style: TextStyle(
                         fontSize: 16,
                         height: 1.4,
@@ -213,7 +245,7 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
                 border: Border(top: BorderSide(color: AppColors.cardBorder)),
               ),
               child: PrimaryButton(
-                label: 'Continue to Background Check',
+                label: 'Next Step',
                 trailingIcon: Icons.arrow_forward,
                 isLoading: _loading,
                 onPressed: _submit,

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/app_theme.dart';
 
@@ -23,7 +24,7 @@ class PickedDocument {
 }
 
 /// Dashed upload target that becomes a file card once a file is chosen.
-/// Accepts JPG, PNG or PDF up to [maxBytes].
+/// Accepts a camera photo, a gallery image, or (if [allowPdf]) a PDF, up to [maxBytes].
 class DocumentUploadSlot extends StatelessWidget {
   static const maxBytes = 5 * 1024 * 1024;
 
@@ -36,6 +37,9 @@ class DocumentUploadSlot extends StatelessWidget {
   final ValueChanged<PickedDocument?> onChanged;
   final String? errorText;
 
+  /// False for identity photos (ID front/back, passport): the server needs an image.
+  final bool allowPdf;
+
   const DocumentUploadSlot({
     super.key,
     required this.label,
@@ -46,31 +50,84 @@ class DocumentUploadSlot extends StatelessWidget {
     this.large = false,
     this.emptyText = 'Add Document',
     this.errorText,
+    this.allowPdf = true,
   });
 
+  /// Lets the caregiver take a photo, choose one from the gallery, or
+  /// (when [allowPdf]) choose a PDF file.
   Future<void> _pick(BuildContext context) async {
-  final result = await FilePicker.pickFiles(
-    type: FileType.custom,
-    allowedExtensions: const ['jpg', 'jpeg', 'png', 'pdf'],
-  );
-  if (result == null || result.isEmpty) return;
-  final file = result.first;
-  final path = file.path;
-  if (path == null) return;
-  final bytes = await File(path).length();
-  if (!context.mounted) return;
-  if (bytes > maxBytes) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('File is too large. Maximum size is 5 MB.')),
+    final source = await showModalBottomSheet<_Source>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(sheet, _Source.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheet, _Source.gallery),
+            ),
+            if (allowPdf)
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined),
+                title: const Text('Choose a PDF file'),
+                onTap: () => Navigator.pop(sheet, _Source.file),
+              ),
+          ],
+        ),
+      ),
     );
-    return;
+    if (source == null) return;
+
+    String? path;
+    try {
+      if (source == _Source.file) {
+        final result = await FilePicker.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['pdf'],
+        );
+        if (result.isEmpty) return;
+        path = result.first.path; // null for a cloud file not downloaded
+      } else {
+        // Resized and compressed: a full phone photo can exceed 5 MB, and
+        // 2000 px is plenty for face matching and OCR.
+        final photo = await ImagePicker().pickImage(
+          source: source == _Source.camera ? ImageSource.camera : ImageSource.gallery,
+          maxWidth: 2000,
+          maxHeight: 2000,
+          imageQuality: 85,
+        );
+        path = photo?.path;
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the camera or gallery. Check app permissions.')),
+      );
+      return;
+    }
+    if (path == null) return;
+
+    final bytes = await File(path).length();
+    if (!context.mounted) return;
+    if (bytes > maxBytes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File is too large. Maximum size is 5 MB.')),
+      );
+      return;
+    }
+    onChanged(PickedDocument(
+      name: path.split(RegExp(r'[\\/]')).last,
+      path: path,
+      size: bytes,
+    ));
   }
-  onChanged(PickedDocument(
-    name: path.split(RegExp(r'[\\/]')).last,
-    path: path,
-    size: bytes,
-  ));
-}
 
   @override
   Widget build(BuildContext context) {
@@ -262,6 +319,8 @@ class DocumentUploadSlot extends StatelessWidget {
     );
   }
 }
+
+enum _Source { camera, gallery, file }
 
 class _DashedBorderPainter extends CustomPainter {
   final Color color;

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_theme.dart';
+import '../../services/api_client.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/auth_card.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/primary_button.dart';
+import '../onboarding/details_screen.dart';
+import '../onboarding/verification_status_screen.dart';
+import '../onboarding/verify_email_screen.dart';
 import 'create_account_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -48,14 +52,40 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
+    final email = _emailCtrl.text.trim();
     try {
-      await authService.login(
-        email: _emailCtrl.text.trim(),
+      final result = await authService.login(
+        email: email,
         password: _passwordCtrl.text,
       );
       if (!mounted) return;
-      _showMessage('Logged in (mock). Next: home dashboard.');
-      // TODO: navigate to the home dashboard once it exists.
+      // Caregivers who already submitted KYC land on their status; everyone
+      // else continues onboarding from the details step.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => result.hasSubmittedKyc
+              ? const VerificationStatusScreen()
+              : const DetailsScreen(),
+        ),
+        (_) => false,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      if (e.reason == 'email_not_verified') {
+        // Send a fresh code and take them to the code screen.
+        try {
+          await onboardingService.resendVerificationCode(email);
+        } catch (_) {
+          // The code screen has its own Resend button if this fails.
+        }
+        if (!mounted) return;
+        _showMessage('Verify your email first. We sent you a new code.');
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => VerifyEmailScreen(email: email)),
+        );
+      } else {
+        _showMessage(e.message);
+      }
     } catch (_) {
       if (!mounted) return;
       _showMessage('Login failed. Check your email and password.');

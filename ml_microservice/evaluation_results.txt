@@ -1,0 +1,15 @@
+Model: Facenet | detector: mtcnn | metric: euclidean_l2
+Pairs evaluated: 790 (396 genuine, 394 impostor), skipped: 1
+AUC: 0.9891
+EER: 0.0468 at distance threshold 1.0958
+At EER threshold -> TAR: 0.9520, FAR: 0.0457, accuracy: 0.9532
+TAR at FAR = 1%: 0.8460
+
+10-fold cross-validation (threshold chosen on 9 folds, measured on the held-out fold):
+  accuracy: 0.9544 +- 0.0278
+  TAR:      0.9521 +- 0.0328
+  FAR:      0.0429 +- 0.0356
+  threshold:1.0959 +- 0.0047
+
+Deployment threshold (EER on all pairs, copy to system_settings.face_distance_threshold): 1.0958
+Accuracy at DeepFace default threshold (0.8000): 0.7810

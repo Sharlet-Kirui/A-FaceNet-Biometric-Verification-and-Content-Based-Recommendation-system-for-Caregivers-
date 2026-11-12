@@ -30,7 +30,7 @@ class AppDropdownField extends StatelessWidget {
       children: [
         FieldLabel(label),
         DropdownButtonFormField<String>(
-          value: value,
+          initialValue: value,
           isExpanded: true,
           validator: validator,
           onChanged: onChanged,

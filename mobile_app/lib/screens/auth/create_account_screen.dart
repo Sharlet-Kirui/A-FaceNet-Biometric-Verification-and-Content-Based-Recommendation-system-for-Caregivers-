@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/app_theme.dart';
 import '../../core/password_policy.dart';
+import '../../services/api_client.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/auth_card.dart';
@@ -87,9 +88,9 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => VerifyEmailScreen(email: email)),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      _showMessage('Could not create your account. Please try again.');
+      _showMessage(friendlyError(e, 'Could not create your account. Please try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

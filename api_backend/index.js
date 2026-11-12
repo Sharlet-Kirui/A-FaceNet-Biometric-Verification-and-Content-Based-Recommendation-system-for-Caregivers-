@@ -1,20 +1,9 @@
-const express = require('express');
+// Entry point: loads .env, then starts the Express app.
 require('dotenv').config();
-const { Pool } = require('pg');
+const app = require('./app');
 
-const app = express();
-app.use(express.json());
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-app.get('/', (req, res) => res.send('API running'));
-
-app.get('/health/db', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT NOW()');
-    res.json({ status: 'ok', dbTime: result.rows[0].now });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
+const PORT = Number(process.env.PORT || 3000);
+app.listen(PORT, () => {
+  console.log(`api_backend listening on http://localhost:${PORT}`);
+  console.log(`ML service: ${process.env.ML_SERVICE_URL || 'http://localhost:8000'}`);
 });
-
-app.listen(5000, () => console.log('Server on port 5000'));

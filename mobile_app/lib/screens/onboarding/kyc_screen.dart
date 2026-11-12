@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_theme.dart';
+import '../../services/api_client.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/document_upload_slot.dart';
 import '../../widgets/onboarding_app_bar.dart';
@@ -23,6 +24,7 @@ class _KycScreenState extends State<KycScreen> {
   final _docs = <String, PickedDocument?>{};
   bool _submitted = false;
   bool _loading = false;
+  bool _consent = false;
 
   bool get _isPassport => widget.idType == 'Passport';
   List<String> get _requiredKeys =>
@@ -46,6 +48,10 @@ class _KycScreenState extends State<KycScreen> {
       _showMessage('Upload the required documents to continue.');
       return;
     }
+    if (!_consent) {
+      _showMessage('Tick the consent box to continue.');
+      return;
+    }
     setState(() => _loading = true);
     try {
       await onboardingService.submitKyc({
@@ -56,9 +62,9 @@ class _KycScreenState extends State<KycScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const SelfieScreen()),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      _showMessage('Could not upload your documents. Please try again.');
+      _showMessage(friendlyError(e, 'Could not upload your documents. Please try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -83,6 +89,7 @@ class _KycScreenState extends State<KycScreen> {
         value: _docs[key],
         errorText: _error(key),
         onChanged: (d) => _set(key, d),
+        allowPdf: !const {'passport', 'idFront', 'idBack'}.contains(key),
       ),
     );
   }
@@ -192,6 +199,29 @@ class _KycScreenState extends State<KycScreen> {
                       'JPG, PNG or PDF, up to 5 MB each.',
                       style:
                           TextStyle(fontSize: 13, color: AppColors.textMuted),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: _submitted && !_consent
+                              ? AppColors.error
+                              : AppColors.cardBorder,
+                        ),
+                      ),
+                      child: CheckboxListTile(
+                        value: _consent,
+                        onChanged: (v) => setState(() => _consent = v ?? false),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text(
+                          'I consent to my face and ID photos being processed '
+                          'to verify my identity, and to my details being '
+                          'checked against the national identity registry.',
+                          style: TextStyle(fontSize: 14, height: 1.4),
+                        ),
+                      ),
                     ),
                   ],
                 ),
