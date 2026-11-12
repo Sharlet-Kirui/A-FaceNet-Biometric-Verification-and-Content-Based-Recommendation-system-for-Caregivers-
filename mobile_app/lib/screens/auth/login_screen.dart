@@ -7,6 +7,7 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/auth_card.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/primary_button.dart';
+import '../jobs/main_shell.dart';
 import '../onboarding/details_screen.dart';
 import '../onboarding/verification_status_screen.dart';
 import '../onboarding/verify_email_screen.dart';
@@ -59,13 +60,15 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordCtrl.text,
       );
       if (!mounted) return;
-      // Caregivers who already submitted KYC land on their status; everyone
-      // else continues onboarding from the details step.
+      // Verified caregivers go to their job matches; those who submitted KYC
+      // land on their status; everyone else continues from the details step.
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-          builder: (_) => result.hasSubmittedKyc
-              ? const VerificationStatusScreen()
-              : const DetailsScreen(),
+          builder: (_) => result.onboardingStatus == 'verified'
+              ? const MainShell()
+              : result.hasSubmittedKyc
+                  ? const VerificationStatusScreen()
+                  : const DetailsScreen(),
         ),
         (_) => false,
       );
