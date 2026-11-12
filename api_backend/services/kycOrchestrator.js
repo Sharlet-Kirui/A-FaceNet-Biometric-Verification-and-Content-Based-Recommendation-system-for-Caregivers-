@@ -13,6 +13,7 @@ const db = require('../db');
 const ml = require('./mlClient');
 const { loadSettings, evaluateTrust } = require('./trustScore');
 const { decryptId } = require('./idCrypto');
+const { notify, verificationMessage } = require('./notify');
 
 let embeddingCast; // 'vector' or 'real[]', read once from the database
 async function getEmbeddingCast(c) {
@@ -58,7 +59,10 @@ async function runVerification(submissionId) {
 
   const dob = sub.dob; // formatted in SQL: a JS Date would shift the day in UTC+3
   let iprs = { status: 'unavailable', reason: 'missing_details' };
-  if (sub.id_number_encrypted && sub.id_type && dob) {
+  if (!settings.iprs_enforced) {
+    // registry switched off by an administrator: not consulted, recorded as not checked
+    iprs = { status: 'not_checked', reason: 'iprs_not_enforced' };
+  } else if (sub.id_number_encrypted && sub.id_type && dob) {
     const r = await ml.iprsLookup({ id_type: sub.id_type, id_number: decryptId(sub.id_number_encrypted),
       first_name: sub.first_name, last_name: sub.last_name, date_of_birth: dob });
     iprs = r.notAvailable ? { status: 'unavailable', reason: 'endpoint_not_built' } : r;
@@ -110,7 +114,7 @@ async function runVerification(submissionId) {
         Number.isFinite(face.distance) ? face.distance : null,
         result.components.face, result.components.ocr,
         liveness.status === 'run' && Number.isFinite(liveness.liveness_score) ? liveness.liveness_score : null,
-        ['verified', 'mismatch', 'unavailable'].includes(iprs.status) ? iprs.status : 'unavailable',
+        ['verified', 'mismatch', 'unavailable', 'not_checked'].includes(iprs.status) ? iprs.status : 'unavailable',
         result.score,
         JSON.stringify({
           decision: result.decision, failedGates: result.failedGates, reasons: result.reasons,
@@ -152,6 +156,8 @@ async function runVerification(submissionId) {
     // The latest verification result decides the status, so it can move back from verified to under_review
     await c.query('UPDATE caregivers SET onboarding_status = $2 WHERE caregiver_id = $1',
       [sub.caregiver_id, result.decision === 'approved' ? 'verified' : 'under_review']);
+    const [type, title, body] = verificationMessage(result.decision === 'approved');
+    await notify(c, sub.caregiver_id, type, title, body, { submissionId });
   });
 
   return { submissionId, ...result, liveness: liveness.status, iprs: iprs.status, ocr: ocr.status };

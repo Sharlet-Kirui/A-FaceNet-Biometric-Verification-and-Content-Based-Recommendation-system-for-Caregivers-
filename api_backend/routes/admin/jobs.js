@@ -2,12 +2,14 @@
 const express = require('express');
 const db = require('../../db');
 const { requireSuperAdmin } = require('../../middleware/adminAuth');
+const { notify } = require('../../services/notify');
 const { wrap, isUuid, page, audit } = require('./util');
 
 const router = express.Router();
 const JOB_TYPES = ['full_time', 'part_time', 'live_in', 'temporary'];
 const SHIFTS = ['morning', 'afternoon', 'night', 'live_in'];
 const JOB_STATUSES = ['draft', 'open', 'filled', 'closed'];
+const APPLICANT_STATUSES = ['interested', 'shortlisted', 'declined'];
 
 const num = (v) => (v == null ? null : Number(v));
 const clean = (s) => (s == null ? '' : String(s).trim());
@@ -84,10 +86,15 @@ async function loadJob(jobId) {
       WHERE r.job_id = $1 ORDER BY r.importance DESC, t.skill_name`, [jobId])).rows;
   const interested = (await db.query(
     `SELECT m.caregiver_id, c.first_name, c.last_name, c.county, c.experience_years, c.phone, c.email,
-            m.match_score, m.matched_at, t.score AS trust_score, t.is_verified
+            m.match_score, m.matched_at, m.status, t.score AS trust_score, t.is_verified,
+            (SELECT d.document_id FROM kyc_documents d WHERE d.caregiver_id = m.caregiver_id AND d.doc_type = 'cv'
+              ORDER BY d.created_at DESC LIMIT 1) AS cv_document_id,
+            (SELECT d.mime_type FROM kyc_documents d WHERE d.caregiver_id = m.caregiver_id AND d.doc_type = 'cv'
+              ORDER BY d.created_at DESC LIMIT 1) AS cv_mime_type
        FROM job_matches m JOIN caregivers c USING (caregiver_id)
        LEFT JOIN trust_scores t ON t.caregiver_id = m.caregiver_id
-      WHERE m.job_id = $1 AND m.status = 'interested' ORDER BY m.match_score DESC`, [jobId])).rows;
+      WHERE m.job_id = $1 AND m.status = ANY($2)
+      ORDER BY array_position($2::text[], m.status::text), m.match_score DESC`, [jobId, ['shortlisted', 'interested', 'declined']])).rows;
   return {
     jobId: job.job_id, title: job.title, description: job.description,
     categoryId: job.category_id, categoryName: job.category_name,
@@ -98,7 +105,8 @@ async function loadJob(jobId) {
       importance: num(r.importance), requiredProficiency: r.required_proficiency })),
     interested: interested.map((i) => ({ caregiverId: i.caregiver_id, name: `${i.first_name} ${i.last_name}`,
       county: i.county, experienceYears: i.experience_years, phone: i.phone, email: i.email,
-      matchScore: num(i.match_score), trustScore: num(i.trust_score), isVerified: i.is_verified, interestedAt: i.matched_at })),
+      matchScore: num(i.match_score), trustScore: num(i.trust_score), isVerified: i.is_verified, interestedAt: i.matched_at,
+      status: i.status, cvDocumentId: i.cv_document_id, cvMimeType: i.cv_mime_type })),
   };
 }
 
@@ -118,7 +126,8 @@ router.get('/jobs', wrap(async (req, res) => {
     `SELECT j.job_id, j.title, j.county, j.shift, j.job_type, j.status, j.salary_min_kes, j.salary_max_kes,
             j.min_experience_years, j.created_at, c.name AS category_name,
             (SELECT count(*) FROM job_skill_requirements r WHERE r.job_id = j.job_id)::int AS requirement_count,
-            (SELECT count(*) FROM job_matches m WHERE m.job_id = j.job_id AND m.status = 'interested')::int AS interested_count,
+            (SELECT count(*) FROM job_matches m WHERE m.job_id = j.job_id
+               AND m.status IN ('interested', 'shortlisted', 'declined'))::int AS interested_count,
             count(*) OVER () AS total
        FROM job_postings j JOIN job_categories c USING (category_id)
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -190,11 +199,57 @@ router.patch('/jobs/:id/status', wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Job not found' });
   const status = req.body?.status;
   if (!JOB_STATUSES.includes(status)) return res.status(400).json({ error: `status: ${JOB_STATUSES.join(', ')}` });
-  const { rows } = await db.query(
-    'UPDATE job_postings SET status = $2 WHERE job_id = $1 RETURNING job_id, title', [req.params.id, status]);
-  if (!rows[0]) return res.status(404).json({ error: 'Job not found' });
-  await audit(db, req, { actionType: 'job_status_changed', details: { jobId: rows[0].job_id, title: rows[0].title, status } });
+  const found = await db.transaction(async (c) => {
+    const before = (await c.query('SELECT title, status FROM job_postings WHERE job_id = $1', [req.params.id])).rows[0];
+    if (!before) return false;
+    await c.query('UPDATE job_postings SET status = $2 WHERE job_id = $1', [req.params.id, status]);
+    await audit(c, req, { actionType: 'job_status_changed', details: { jobId: req.params.id, title: before.title, status } });
+    // tell everyone still waiting on this job that it is no longer open
+    if (['filled', 'closed'].includes(status) && before.status !== status) {
+      const waiting = (await c.query(
+        `SELECT caregiver_id FROM job_matches WHERE job_id = $1 AND status IN ('interested', 'shortlisted')`,
+        [req.params.id])).rows;
+      for (const w of waiting) {
+        await notify(c, w.caregiver_id, `job_${status}`,
+          status === 'filled' ? `Position filled: ${before.title}` : `Job closed: ${before.title}`,
+          status === 'filled' ? 'This position has been filled. Keep an eye on your matches for new jobs.'
+            : 'This job is no longer open. Keep an eye on your matches for new jobs.',
+          { jobId: req.params.id });
+      }
+    }
+    return true;
+  });
+  if (!found) return res.status(404).json({ error: 'Job not found' });
   res.json(await loadJob(req.params.id));
+}));
+
+// PATCH /admin/jobs/:id/applicants/:caregiverId  { status: shortlisted | declined | interested }
+router.patch('/jobs/:id/applicants/:caregiverId', wrap(async (req, res) => {
+  const { id, caregiverId } = req.params;
+  if (!isUuid(id) || !isUuid(caregiverId)) return res.status(404).json({ error: 'Applicant not found' });
+  const status = req.body?.status;
+  if (!APPLICANT_STATUSES.includes(status)) return res.status(400).json({ error: `status: ${APPLICANT_STATUSES.join(', ')}` });
+  const result = await db.transaction(async (c) => {
+    const row = (await c.query(
+      `SELECT m.status, j.title FROM job_matches m JOIN job_postings j USING (job_id)
+        WHERE m.job_id = $1 AND m.caregiver_id = $2 AND m.status IN ('interested', 'shortlisted', 'declined')`,
+      [id, caregiverId])).rows[0];
+    if (!row) return null;
+    if (row.status === status) return row;
+    await c.query('UPDATE job_matches SET status = $3 WHERE job_id = $1 AND caregiver_id = $2', [id, caregiverId, status]);
+    await audit(c, req, { actionType: `applicant_${status}`,
+      details: { jobId: id, caregiverId, title: row.title, previousStatus: row.status } });
+    if (status === 'shortlisted') {
+      await notify(c, caregiverId, 'applicant_shortlisted', `You have been shortlisted: ${row.title}`,
+        'The family or agency will contact you about the next steps.', { jobId: id });
+    } else if (status === 'declined') {
+      await notify(c, caregiverId, 'applicant_declined', `Update on ${row.title}`,
+        'You were not selected for this job this time. Your other matches are still open to you.', { jobId: id });
+    }
+    return row;
+  });
+  if (!result) return res.status(404).json({ error: 'This caregiver has not expressed interest in this job' });
+  res.json(await loadJob(id));
 }));
 
 // ---------------------------------------------------------------- categories

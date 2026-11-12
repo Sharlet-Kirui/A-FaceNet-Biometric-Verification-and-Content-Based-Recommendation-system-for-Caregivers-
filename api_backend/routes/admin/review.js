@@ -5,6 +5,7 @@ const express = require('express');
 const db = require('../../db');
 const { decryptId } = require('../../services/idCrypto');
 const { loadSettings } = require('../../services/trustScore');
+const { notify, verificationMessage } = require('../../services/notify');
 const { wrap, isUuid, page, audit } = require('./util');
 
 const router = express.Router();
@@ -193,6 +194,8 @@ router.post('/submissions/:id/decision', wrap(async (req, res) => {
       details: { submissionId: sub.submission_id, caregiverId: sub.caregiver_id, previousStatus: sub.status,
         automaticDecision: report.auto_decision, reason: reason || null },
     });
+    const [type, title, body] = verificationMessage(approve, { byAdmin: true, reason: reason || null });
+    await notify(c, sub.caregiver_id, type, title, body, { submissionId: sub.submission_id });
     return { status: 200, body: { submissionId: sub.submission_id, status: approve ? 'approved' : 'rejected',
       caregiverStatus: approve ? 'verified' : 'rejected' } };
   });
