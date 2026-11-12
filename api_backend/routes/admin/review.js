@@ -4,6 +4,7 @@ const fs = require('fs');
 const express = require('express');
 const db = require('../../db');
 const { decryptId } = require('../../services/idCrypto');
+const { loadSettings } = require('../../services/trustScore');
 const { wrap, isUuid, page, audit } = require('./util');
 
 const router = express.Router();
@@ -89,6 +90,9 @@ router.get('/submissions/:id', wrap(async (req, res) => {
     'SELECT submission_id, attempt_number, status, submitted_at FROM kyc_submissions WHERE caregiver_id = $1 ORDER BY attempt_number',
     [sub.caregiver_id])).rows;
 
+  // current thresholds, for reports that did not store the ones they were decided with (seeded data)
+  const settings = await loadSettings(db);
+
   let idNumber = null;
   try { idNumber = sub.id_number_encrypted ? decryptId(sub.id_number_encrypted) : null; } catch { idNumber = null; }
 
@@ -98,6 +102,8 @@ router.get('/submissions/:id', wrap(async (req, res) => {
     status: sub.status,
     submittedAt: sub.submitted_at,
     livenessChallenge: sub.liveness_challenge,
+    currentThresholds: { faceDistance: settings.face_distance_threshold, trust: settings.trust_threshold,
+      blur: settings.blur_threshold },
     caregiver: {
       caregiverId: sub.caregiver_id, firstName: sub.first_name, lastName: sub.last_name, email: sub.email,
       phone: sub.phone, dateOfBirth: sub.date_of_birth, gender: sub.gender, nationality: sub.nationality,
