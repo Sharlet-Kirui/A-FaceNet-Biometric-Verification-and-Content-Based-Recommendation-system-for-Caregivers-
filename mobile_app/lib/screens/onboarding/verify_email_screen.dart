@@ -23,7 +23,8 @@ class VerifyEmailScreen extends StatefulWidget {
 
 class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   static const _codeLength = 6;
-  static const _resendSeconds = 45;
+  // matches the API's resend cooldown (services/otp.js); codes expire after 10 minutes
+  static const _resendSeconds = 60;
 
   final _codeCtrl = TextEditingController();
   Timer? _timer;
@@ -44,9 +45,9 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     super.dispose();
   }
 
-  void _startTimer() {
+  void _startTimer([int seconds = _resendSeconds]) {
     _timer?.cancel();
-    setState(() => _remaining = _resendSeconds);
+    setState(() => _remaining = seconds);
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
       setState(() => _remaining--);
@@ -54,8 +55,10 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     });
   }
 
-  String get _countdown =>
-      '00:${_remaining.clamp(0, 99).toString().padLeft(2, '0')}';
+  String get _countdown {
+    final r = _remaining.clamp(0, 599);
+    return '${(r ~/ 60).toString().padLeft(2, '0')}:${(r % 60).toString().padLeft(2, '0')}';
+  }
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
@@ -70,6 +73,12 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       setState(() => _error = null);
       _startTimer();
       _showMessage('A new code was sent to ${widget.email}');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      // asked too soon: the server says how long to wait
+      final wait = e.data?['retryAfter'];
+      if (e.reason == 'cooldown' && wait is num) _startTimer(wait.toInt());
+      _showMessage(e.message);
     } catch (e) {
       if (!mounted) return;
       _showMessage(friendlyError(e, 'Could not resend the code. Please try again.'));

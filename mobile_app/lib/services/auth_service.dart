@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'api_client.dart';
 import 'models.dart';
 
@@ -7,6 +9,11 @@ abstract class AuthService {
   Future<LoginResult> login({required String email, required String password});
 
   Future<void> logout();
+
+  /// Emails a reset code (same answer whether or not the account exists).
+  Future<void> requestPasswordReset(String email);
+
+  Future<void> resetPassword({required String email, required String code, required String newPassword});
 }
 
 /// Calls POST /auth/login and keeps the JWT in secure storage.
@@ -27,6 +34,16 @@ class ApiAuthService implements AuthService {
 
   @override
   Future<void> logout() => _api.clearToken();
+
+  @override
+  Future<void> requestPasswordReset(String email) async {
+    final body = await _api.post('/auth/password/forgot', {'email': email});
+    if (kDebugMode && body['devOtp'] != null) debugPrint('[dev] reset code: ${body['devOtp']}');
+  }
+
+  @override
+  Future<void> resetPassword({required String email, required String code, required String newPassword}) =>
+      _api.post('/auth/password/reset', {'email': email, 'code': code, 'newPassword': newPassword});
 }
 
 /// Offline stand-in for UI work without the backend (flutter run --dart-define=USE_MOCK=true).
@@ -39,4 +56,11 @@ class MockAuthService implements AuthService {
 
   @override
   Future<void> logout() async {}
+
+  @override
+  Future<void> requestPasswordReset(String email) => Future.delayed(const Duration(milliseconds: 400));
+
+  @override
+  Future<void> resetPassword({required String email, required String code, required String newPassword}) =>
+      Future.delayed(const Duration(milliseconds: 400));
 }

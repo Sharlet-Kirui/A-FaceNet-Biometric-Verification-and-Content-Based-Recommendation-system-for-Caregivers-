@@ -13,6 +13,7 @@ import '../../widgets/password_strength_meter.dart';
 import '../../widgets/primary_button.dart';
 import '../onboarding/verify_email_screen.dart';
 import 'login_screen.dart';
+import 'privacy_notice_screen.dart';
 
 /// Onboarding step 1 of 4: Account (then email verification).
 /// Phone number now lives on the Details screen to keep this form short.
@@ -30,6 +31,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _loading = false;
+  bool _acceptedPrivacy = false;
+  bool _privacyError = false;
 
   static final _noSpaces = [FilteringTextInputFormatter.deny(RegExp(r'\s'))];
 
@@ -74,8 +77,22 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _openPrivacyNotice() async {
+    final agreed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const PrivacyNoticeScreen()),
+    );
+    if (agreed == true && mounted) {
+      setState(() {
+        _acceptedPrivacy = true;
+        _privacyError = false;
+      });
+    }
+  }
+
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    final valid = _formKey.currentState!.validate();
+    if (!_acceptedPrivacy) setState(() => _privacyError = true);
+    if (!valid || !_acceptedPrivacy) return;
     setState(() => _loading = true);
     try {
       final email = _emailCtrl.text.trim();
@@ -188,7 +205,50 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                         textInputAction: TextInputAction.done,
                         onFieldSubmitted: (_) => _submit(),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Checkbox(
+                            value: _acceptedPrivacy,
+                            isError: _privacyError,
+                            onChanged: (v) => setState(() {
+                              _acceptedPrivacy = v ?? false;
+                              _privacyError = false;
+                            }),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Wrap(
+                                children: [
+                                  const Text('I have read and agree to the ',
+                                      style: TextStyle(fontSize: 14, color: AppColors.textDark)),
+                                  GestureDetector(
+                                    onTap: _openPrivacyNotice,
+                                    child: const Text(
+                                      'Privacy Notice',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.primary,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_privacyError)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 12, bottom: 4),
+                          child: Text('Read and accept the Privacy Notice to continue',
+                              style: TextStyle(fontSize: 13, color: AppColors.error)),
+                        ),
+                      const SizedBox(height: 12),
                       PrimaryButton(
                         label: 'Create Account',
                         trailingIcon: Icons.arrow_forward,

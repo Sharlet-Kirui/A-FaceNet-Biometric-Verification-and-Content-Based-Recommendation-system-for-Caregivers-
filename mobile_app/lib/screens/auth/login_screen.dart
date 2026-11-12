@@ -12,6 +12,7 @@ import '../onboarding/details_screen.dart';
 import '../onboarding/verification_status_screen.dart';
 import '../onboarding/verify_email_screen.dart';
 import 'create_account_screen.dart';
+import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -161,8 +162,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () => _showMessage(
-                            'Password reset is not available yet.',
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ForgotPasswordScreen(initialEmail: _emailCtrl.text.trim()),
+                            ),
                           ),
                           style: TextButton.styleFrom(
                             foregroundColor: AppColors.primary,

@@ -50,8 +50,9 @@ class _MyApplicationsScreenState extends State<MyApplicationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final active = _items.where((j) => j.isOpen).toList();
-    final past = _items.where((j) => !j.isOpen).toList();
+    // Active: still open and not declined. Past: declined, filled or closed.
+    final active = _items.where((j) => j.isOpen && !j.isDeclined).toList();
+    final past = _items.where((j) => !j.isOpen || j.isDeclined).toList();
     return DefaultTabController(
       length: 2,
       child: Scaffold(
@@ -91,7 +92,7 @@ class _MyApplicationsScreenState extends State<MyApplicationsScreen> {
                           empty: const MessageState(
                             icon: Icons.history,
                             title: 'No past applications',
-                            message: 'Jobs that are filled or closed move here.',
+                            message: 'Jobs that are filled or closed, or where you were not selected, move here.',
                           )),
                     ],
                   ),
@@ -121,9 +122,11 @@ class _ApplicationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, bg, fg) = switch (job.jobStatus) {
-      'open' => ('INTEREST SENT', const Color(0xFFFFF3D6), const Color(0xFF8A6100)),
-      'filled' => ('POSITION FILLED', const Color(0xFFF1F2F5), AppColors.textMuted),
+    final (label, bg, fg) = switch ((job.jobStatus, job.status)) {
+      (_, 'declined') => ('NOT SELECTED', const Color(0xFFF1F2F5), AppColors.textMuted),
+      ('open', 'shortlisted') => ('SHORTLISTED', const Color(0xFFE3F4E8), AppColors.success),
+      ('open', _) => ('INTEREST SENT', const Color(0xFFFFF3D6), const Color(0xFF8A6100)),
+      ('filled', _) => ('POSITION FILLED', const Color(0xFFF1F2F5), AppColors.textMuted),
       _ => ('CLOSED', const Color(0xFFF1F2F5), AppColors.textMuted),
     };
     final d = job.interestedAt;

@@ -6,6 +6,9 @@ import '../../services/job_models.dart';
 import '../../services/service_locator.dart';
 import '../../widgets/job_widgets.dart';
 import '../auth/login_screen.dart';
+import '../auth/privacy_notice_screen.dart';
+import '../onboarding/details_screen.dart';
+import '../onboarding/specialties_screen.dart';
 
 /// Caregiver's own profile: trust score, contact details, skills, documents.
 class ProfileScreen extends StatefulWidget {
@@ -44,6 +47,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = friendlyError(e, 'Could not load your profile.'));
     }
+  }
+
+  /// Opens an edit screen; on save, reloads the profile and the job matches.
+  Future<void> _edit(Widget screen) async {
+    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => screen));
+    if (saved == true) {
+      await _load();
+      jobsService.changes.value++; // skills, county or shifts may change the matches
+    }
+  }
+
+  Widget _cardHeader(IconData icon, String title, VoidCallback onEdit) {
+    return Row(
+      children: [
+        Expanded(child: SectionTitle(icon, title)),
+        TextButton.icon(
+          onPressed: onEdit,
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('Edit'),
+        ),
+      ],
+    );
   }
 
   Future<void> _logout() async {
@@ -116,7 +141,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const SectionTitle(Icons.person_outline, 'Personal Info'),
+                            _cardHeader(Icons.person_outline, 'Personal Info',
+                                () => _edit(const DetailsScreen(editMode: true))),
                             _info('EMAIL', p.email),
                             if (p.phone != null && p.phone!.isNotEmpty) _info('PHONE', p.phone!),
                             _info('EXPERIENCE',
@@ -129,7 +155,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const SectionTitle(Icons.psychology_outlined, 'Skills & Specialties'),
+                            _cardHeader(Icons.psychology_outlined, 'Skills & Availability',
+                                () => _edit(const SpecialtiesScreen(idType: 'National ID', editMode: true))),
                             if (p.skills.isEmpty)
                               const Text('No skills listed yet.', style: TextStyle(color: AppColors.textMuted))
                             else
@@ -178,7 +205,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => const PrivacyNoticeScreen(askToAgree: false))),
+                        icon: const Icon(Icons.privacy_tip_outlined),
+                        label: const Text('Privacy Notice and your data rights'),
+                      ),
+                      const SizedBox(height: 8),
                       OutlinedButton.icon(
                         onPressed: _logout,
                         icon: const Icon(Icons.logout),

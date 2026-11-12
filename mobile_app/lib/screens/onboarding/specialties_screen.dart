@@ -18,10 +18,12 @@ class _Group {
 
 /// Onboarding step 2 of 4 (part 2): Specialties / Skill Vector inputs.
 /// Every group lets the caregiver add an entry that isn't listed.
+/// With [editMode] it opens from the Profile screen with the saved choices and saves in place.
 class SpecialtiesScreen extends StatefulWidget {
   final String idType;
+  final bool editMode;
 
-  const SpecialtiesScreen({super.key, required this.idType});
+  const SpecialtiesScreen({super.key, required this.idType, this.editMode = false});
 
   @override
   State<SpecialtiesScreen> createState() => _SpecialtiesScreenState();
@@ -43,13 +45,48 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
     'Medication Management',
   ]);
   final _langs = _Group(['Swahili', 'English']);
+  // Certifications: "Nursing Council Licence" makes the licence a required document
+  final _certs = _Group(['CPR Certified', 'TVET CDACC Level 5', 'NITA Certified', 'Nursing Council Licence']);
   final _avail = _Group(['Live-in', 'Day-shift', 'Night-shift']);
   bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadOptions();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _loadOptions();
+    if (widget.editMode) await _prefill();
+  }
+
+  /// Edit mode: select what the caregiver saved before (GET /caregivers/me).
+  Future<void> _prefill() async {
+    try {
+      final me = await onboardingService.loadMyProfile();
+      if (!mounted) return;
+      final groups = {'specialization': _specs, 'technical': _skills, 'language': _langs, 'certification': _certs};
+      setState(() {
+        for (final s in (me['skills'] as List? ?? const [])) {
+          if (s is! Map) continue;
+          final g = groups['${s['category']}'];
+          final name = '${s['skill_name']}';
+          if (g == null) continue;
+          if (!g.options.contains(name)) {
+            g.options.add(name);
+            g.custom.add(name);
+          }
+          g.selected.add(name);
+        }
+        final shifts = {for (final s in (me['shifts'] as List? ?? const [])) '$s'};
+        if (shifts.contains('live_in')) _avail.selected.add('Live-in');
+        if (shifts.contains('morning') || shifts.contains('afternoon')) _avail.selected.add('Day-shift');
+        if (shifts.contains('night')) _avail.selected.add('Night-shift');
+      });
+    } catch (e) {
+      if (mounted) _showMessage(friendlyError(e, 'Could not load your skills.'));
+    }
   }
 
   /// Uses the platform's skill vocabulary so the caregiver's choices match the
@@ -62,6 +99,7 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
         _replace(_specs, options['specialization']);
         _replace(_skills, options['technical']);
         _replace(_langs, options['language']);
+        _replace(_certs, options['certification']);
       });
     } catch (_) {
       // offline: the built-in lists stay, and the API maps them on save
@@ -127,9 +165,15 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
         'specializations': _specs.selected.toList(),
         'technicalSkills': _skills.selected.toList(),
         'languages': _langs.selected.toList(),
+        'certifications': _certs.selected.toList(),
         'availability': _avail.selected.toList(),
       });
       if (!mounted) return;
+      if (widget.editMode) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Skills updated')));
+        Navigator.of(context).pop(true);
+        return;
+      }
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => KycScreen(idType: widget.idType)),
       );
@@ -219,11 +263,12 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    const OnboardingStepper(
-                      currentStep: 2,
-                      label: 'Specialties',
-                      showHeader: false,
-                    ),
+                    if (!widget.editMode)
+                      const OnboardingStepper(
+                        currentStep: 2,
+                        label: 'Specialties',
+                        showHeader: false,
+                      ),
                     const SizedBox(height: 24),
                     _section('Specializations', _specs,
                         addHint: 'Not listed? Add a specialization'),
@@ -232,6 +277,8 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
                         color: AppColors.success),
                     _section('Languages', _langs,
                         addHint: 'Add another language'),
+                    _section('Certifications', _certs,
+                        addHint: 'Add another certification'),
                     _section('Availability', _avail,
                         addHint: 'Add other availability (e.g. Weekends)'),
                   ],
@@ -245,7 +292,7 @@ class _SpecialtiesScreenState extends State<SpecialtiesScreen> {
                 border: Border(top: BorderSide(color: AppColors.cardBorder)),
               ),
               child: PrimaryButton(
-                label: 'Next Step',
+                label: widget.editMode ? 'Save Changes' : 'Next Step',
                 trailingIcon: Icons.arrow_forward,
                 isLoading: _loading,
                 onPressed: _submit,

@@ -2,20 +2,23 @@ import 'package:flutter/material.dart';
 
 import '../core/app_theme.dart';
 
+/// CareMatch mark (shield = verified trust, heart = care, tick = checked) and name.
+/// The image is assets/brand/logo_mark.png, declared in pubspec.yaml.
 class BrandLogo extends StatelessWidget {
-  const BrandLogo({super.key});
+  final double size;
+  const BrandLogo({super.key, this.size = 34});
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.favorite, color: AppColors.primaryDark, size: 30),
-        SizedBox(width: 10),
+        Image.asset('assets/brand/logo_mark.png', width: size, height: size),
+        const SizedBox(width: 10),
         Text(
-          'CareGivers',
+          'CareMatch',
           style: TextStyle(
-            fontSize: 22,
+            fontSize: size * 0.68,
             fontWeight: FontWeight.w800,
             color: AppColors.primaryDark,
           ),
