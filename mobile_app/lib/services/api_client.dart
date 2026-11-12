@@ -20,7 +20,10 @@ class ApiException implements Exception {
   /// Field-level validation errors, e.g. {'password': 'min 8 chars ...'}.
   final Map<String, dynamic>? fields;
 
-  const ApiException(this.message, {this.statusCode, this.reason, this.fields});
+  /// The whole error body, for extras such as `retryAfter` or `missing`.
+  final Map<String, dynamic>? data;
+
+  const ApiException(this.message, {this.statusCode, this.reason, this.fields, this.data});
 
   @override
   String toString() => 'ApiException($statusCode, $reason): $message';
@@ -149,6 +152,7 @@ class ApiClient {
         statusCode: response.statusCode,
         reason: body['reason'] as String?,
         fields: body['fields'] as Map<String, dynamic>?,
+        data: body,
       );
     }
     return body;
