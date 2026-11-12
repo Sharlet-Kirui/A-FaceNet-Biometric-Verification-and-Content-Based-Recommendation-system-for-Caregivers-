@@ -1,0 +1,12 @@
+[
+  {"id_type": "national_id", "id_number": "30123456", "first_name": "Grace",   "last_name": "Wanjiku",  "date_of_birth": "1994-03-12"},
+  {"id_type": "national_id", "id_number": "28765432", "first_name": "Mary",    "last_name": "Otieno",   "date_of_birth": "1988-07-25"},
+  {"id_type": "national_id", "id_number": "33456789", "first_name": "Faith",   "last_name": "Chebet",   "date_of_birth": "1999-11-02"},
+  {"id_type": "national_id", "id_number": "25678901", "first_name": "Joyce",   "last_name": "Mutua",    "date_of_birth": "1985-01-30"},
+  {"id_type": "national_id", "id_number": "31234567", "first_name": "Brian",   "last_name": "Kiplagat", "date_of_birth": "1996-05-18"},
+  {"id_type": "national_id", "id_number": "29876543", "first_name": "Esther",  "last_name": "Akinyi",   "date_of_birth": "1991-09-09"},
+  {"id_type": "national_id", "id_number": "34567890", "first_name": "Lucy",    "last_name": "Kamau",    "date_of_birth": "2000-12-21"},
+  {"id_type": "national_id", "id_number": "27654321", "first_name": "Mercy",   "last_name": "Naliaka",  "date_of_birth": "1987-04-04"},
+  {"id_type": "passport",    "id_number": "A1234567", "first_name": "Ruth",    "last_name": "Nakato",   "date_of_birth": "1993-06-15"},
+  {"id_type": "passport",    "id_number": "B7654321", "first_name": "Samuel",  "last_name": "Habimana", "date_of_birth": "1990-02-28"}
+]
