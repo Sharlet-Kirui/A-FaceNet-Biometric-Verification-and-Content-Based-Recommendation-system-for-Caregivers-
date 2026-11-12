@@ -25,15 +25,53 @@ class _KycScreenState extends State<KycScreen> {
   bool _submitted = false;
   bool _loading = false;
   bool _consent = false;
+  bool _needsLicense = false;
+
+  /// Already on the open submission (server doc types), e.g. when retaking one photo.
+  Set<String> _onServer = {};
+
+  static const _serverType = {
+    'idFront': 'id_front', 'idBack': 'id_back', 'passport': 'passport', 'goodConduct': 'good_conduct',
+    'tvetCdacc': 'tvet_cdacc', 'license': 'license', 'cv': 'cv', 'other': 'other',
+  };
 
   bool get _isPassport => widget.idType == 'Passport';
-  List<String> get _requiredKeys =>
-      _isPassport ? ['passport'] : ['idFront', 'idBack'];
+
+  /// Identity documents, Certificate of Good Conduct and CV for everyone;
+  /// the licence for caregivers who listed a Nursing Council licence.
+  List<String> get _requiredKeys => [
+        ...(_isPassport ? ['passport'] : ['idFront', 'idBack']),
+        'goodConduct',
+        'cv',
+        if (_needsLicense) 'license',
+      ];
+
+  bool _have(String key) => _docs[key] != null || _onServer.contains(_serverType[key]);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRequirements();
+  }
+
+  Future<void> _loadRequirements() async {
+    try {
+      final required = await onboardingService.requiredDocuments();
+      final uploaded = await onboardingService.uploadedDocuments();
+      if (!mounted) return;
+      setState(() {
+        _needsLicense = required.contains('license');
+        _onServer = uploaded.toSet();
+      });
+    } catch (_) {
+      // offline: the server still checks before the selfie step
+    }
+  }
 
   void _set(String key, PickedDocument? doc) => setState(() => _docs[key] = doc);
 
   String? _error(String key) =>
-      _submitted && _requiredKeys.contains(key) && _docs[key] == null
+      _submitted && _requiredKeys.contains(key) && !_have(key)
           ? 'This document is required'
           : null;
 
@@ -44,7 +82,7 @@ class _KycScreenState extends State<KycScreen> {
 
   Future<void> _next() async {
     setState(() => _submitted = true);
-    if (_requiredKeys.any((k) => _docs[k] == null)) {
+    if (_requiredKeys.any((k) => !_have(k))) {
       _showMessage('Upload the required documents to continue.');
       return;
     }
@@ -85,7 +123,7 @@ class _KycScreenState extends State<KycScreen> {
         required: required,
         optional: optional,
         large: large,
-        emptyText: emptyText,
+        emptyText: _onServer.contains(_serverType[key]) ? 'Already uploaded · tap to replace' : emptyText,
         value: _docs[key],
         errorText: _error(key),
         onChanged: (d) => _set(key, d),
@@ -188,11 +226,14 @@ class _KycScreenState extends State<KycScreen> {
                           large: true,
                           emptyText: 'Tap to upload back of ID'),
                     ],
-                    _slot('goodConduct', 'Certificate of Good Conduct'),
+                    _slot('goodConduct', 'Certificate of Good Conduct', required: true,
+                        emptyText: 'Photo or PDF from eCitizen'),
+                    _slot('cv', 'Curriculum Vitae (CV)', required: true,
+                        emptyText: 'A photo of a printed or handwritten CV is fine'),
+                    _slot('license', 'Professional License (Nursing Council)',
+                        required: _needsLicense, optional: !_needsLicense),
                     _slot('tvetCdacc',
-                        'TVET CDACC Certificate/NITA Certification'),
-                    _slot('license', 'Professional License'),
-                    _slot('cv', 'Curriculum Vitae (CV)', optional: true),
+                        'TVET CDACC Certificate/NITA Certification', optional: true),
                     _slot('other', 'Other Supporting Document',
                         optional: true),
                     const Text(

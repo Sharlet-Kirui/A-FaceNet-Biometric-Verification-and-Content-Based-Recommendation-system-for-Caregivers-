@@ -31,8 +31,11 @@ class _WorkEntry {
 }
 
 /// Onboarding step 2 of 4: personal, address, credentials, work history.
+/// With [editMode] it opens from the Profile screen, prefilled, and saves in place.
+/// After verification the identity fields (date of birth, nationality, ID) are locked.
 class DetailsScreen extends StatefulWidget {
-  const DetailsScreen({super.key});
+  final bool editMode;
+  const DetailsScreen({super.key, this.editMode = false});
 
   @override
   State<DetailsScreen> createState() => _DetailsScreenState();
@@ -53,6 +56,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   static const _idTypes = ['National ID', 'Passport'];
   static const _genders = ['Female', 'Male', 'Other', 'Prefer not to say'];
   static const _minAge = 18;
+  static const _maxYears = 40;
 
   final _formKey = GlobalKey<FormState>();
 
@@ -72,7 +76,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   final _countryCtrl = TextEditingController(text: 'Kenya');
 
   // Professional
-  double _years = 0;
+  int _years = 0;
   final _conductRefCtrl = TextEditingController();
   final _conductAuthCtrl = TextEditingController();
   final _conductExpiryCtrl = TextEditingController();
@@ -82,6 +86,74 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   final _work = <_WorkEntry>[];
   bool _loading = false;
+  bool _prefilling = false;
+  bool _identityLocked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.editMode) _prefill();
+  }
+
+  /// Fills the form from GET /caregivers/me (edit mode).
+  Future<void> _prefill() async {
+    setState(() => _prefilling = true);
+    try {
+      final me = await onboardingService.loadMyProfile();
+      if (!mounted) return;
+      String? date(Object? iso) {
+        final d = DateTime.tryParse('${iso ?? ''}');
+        return d == null ? null : formatDate(d);
+      }
+      const genders = {'female': 'Female', 'male': 'Male', 'other': 'Other', 'prefer_not_to_say': 'Prefer not to say'};
+      final credentials = {
+        for (final c in (me['credentials'] as List? ?? const []))
+          if (c is Map) '${c['credential_type']}': c,
+      };
+      setState(() {
+        _dobCtrl.text = date(me['date_of_birth']) ?? '';
+        _gender = genders[me['gender']];
+        _phoneCtrl.text = '${me['phone'] ?? ''}';
+        final nationality = me['nationality'] as String?;
+        _nationality = _nationalities.contains(nationality) ? nationality : (nationality == null ? null : 'Other');
+        _idType = me['id_type'] == 'passport' ? 'Passport' : 'National ID';
+        _idNumberCtrl.text = '${me['id_number'] ?? ''}';
+        _streetCtrl.text = '${me['street'] ?? ''}';
+        _townCtrl.text = '${me['town'] ?? ''}';
+        _countyCtrl.text = '${me['county'] ?? ''}';
+        _postalCtrl.text = '${me['postal_code'] ?? ''}';
+        _countryCtrl.text = '${me['country'] ?? 'Kenya'}';
+        _years = ((me['experience_years'] as num?) ?? 0).clamp(0, _maxYears).toInt();
+        final pc = credentials['police_clearance'];
+        _conductRefCtrl.text = '${pc?['reference_number'] ?? ''}';
+        _conductAuthCtrl.text = '${pc?['issuing_authority'] ?? ''}';
+        _conductExpiryCtrl.text = date(pc?['expiry_date']) ?? '';
+        final lic = credentials['professional_license'];
+        _licenseNoCtrl.text = '${lic?['reference_number'] ?? ''}';
+        _licenseAuthCtrl.text = '${lic?['issuing_authority'] ?? ''}';
+        _licenseExpiryCtrl.text = date(lic?['expiry_date']) ?? '';
+        for (final w in _work) {
+          w.dispose();
+        }
+        _work.clear();
+        for (final w in (me['work_history'] as List? ?? const [])) {
+          if (w is! Map) continue;
+          final e = _WorkEntry();
+          e.employer.text = '${w['employer'] ?? ''}';
+          e.role.text = '${w['role'] ?? ''}';
+          e.duties.text = '${w['duties'] ?? ''}';
+          e.from.text = '${w['from_year'] ?? ''}';
+          e.to.text = w['to_year'] == null ? '' : '${w['to_year']}';
+          _work.add(e);
+        }
+        _identityLocked = me['identity_locked'] == true;
+      });
+    } catch (e) {
+      if (mounted) _showMessage(friendlyError(e, 'Could not load your details.'));
+    } finally {
+      if (mounted) setState(() => _prefilling = false);
+    }
+  }
 
   List<TextEditingController> get _conductGroup =>
       [_conductRefCtrl, _conductAuthCtrl, _conductExpiryCtrl];
@@ -151,8 +223,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
     return group.any((c) => c.text.trim().isNotEmpty) ? message : null;
   }
 
-  String? _validateExpiry(String? v, List<TextEditingController> group) {
-    final missing = _groupRequired(v, group, 'Enter the expiry date');
+  String? _validateExpiry(String? v, List<TextEditingController> group, {bool required = false}) {
+    final missing = required
+        ? _required(v, 'Enter the expiry date')
+        : _groupRequired(v, group, 'Enter the expiry date');
     if (missing != null) return missing;
     if ((v ?? '').trim().isEmpty) return null;
     final d = parseDate(v!);
@@ -177,8 +251,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   // ---- helpers ------------------------------------------------------------
 
-  String get _yearsLabel => _years >= 5 ? '5+' : _years.round().toString();
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
@@ -187,6 +259,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) {
       _showMessage('Please fix the highlighted fields.');
+      return;
+    }
+    if (_years > 0 && _work.isEmpty) {
+      _showMessage('You reported $_years year${_years == 1 ? '' : 's'} of experience: add at least one workplace.');
       return;
     }
     setState(() => _loading = true);
@@ -212,7 +288,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           'postalCode': _postalCtrl.text.trim(),
           'country': _countryCtrl.text.trim(),
         },
-        'experienceYears': _years.round(),
+        'experienceYears': _years,
         'policeClearance': {
           'referenceNumber': orNull(_conductRefCtrl),
           'issuingAuthority': orNull(_conductAuthCtrl),
@@ -235,6 +311,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
         ],
       });
       if (!mounted) return;
+      if (widget.editMode) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Details updated')));
+        Navigator.of(context).pop(true);
+        return;
+      }
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => SpecialtiesScreen(idType: _idType)),
       );
@@ -284,6 +365,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   Widget _gap([double h = 14]) => SizedBox(height: h);
 
+  /// Identity fields cannot change after verification: shown greyed and not editable.
+  Widget _lockable(Widget child) => _identityLocked
+      ? IgnorePointer(child: Opacity(opacity: 0.55, child: child))
+      : child;
+
   Widget _personalCard() {
     final now = DateTime.now();
     return AuthCard(
@@ -291,14 +377,32 @@ class _DetailsScreenState extends State<DetailsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _cardTitle(Icons.person_outline, 'Personal Info'),
-          AppDateField(
+          if (_identityLocked)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lock_outline, size: 18, color: AppColors.textMuted),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Date of birth, nationality and ID were verified and cannot be changed. '
+                      'Contact support if they are wrong.',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          _lockable(AppDateField(
             label: 'Date of Birth',
             controller: _dobCtrl,
             validator: _validateDob,
             firstDate: DateTime(1940),
             lastDate: DateTime(now.year - _minAge, now.month, now.day),
             initialDate: DateTime(now.year - 25, now.month, now.day),
-          ),
+          )),
           _gap(),
           AppDropdownField(
             label: 'Gender',
@@ -321,7 +425,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
             autofillHints: const [AutofillHints.telephoneNumber],
           ),
           _gap(),
-          AppDropdownField(
+          _lockable(AppDropdownField(
             label: 'Nationality',
             hint: 'Select Nationality',
             icon: Icons.public,
@@ -329,18 +433,18 @@ class _DetailsScreenState extends State<DetailsScreen> {
             items: _nationalities,
             onChanged: (v) => setState(() => _nationality = v),
             validator: (v) => v == null ? 'Select your nationality' : null,
-          ),
+          )),
           _gap(),
-          AppDropdownField(
+          _lockable(AppDropdownField(
             label: 'ID Type',
             hint: 'Select ID type',
             icon: Icons.badge_outlined,
             value: _idType,
             items: _idTypes,
             onChanged: (v) => setState(() => _idType = v ?? _idTypes.first),
-          ),
+          )),
           _gap(),
-          AppTextField(
+          _lockable(AppTextField(
             label: '$_idType Number',
             hint: _idType == 'Passport' ? 'e.g. A1234567' : 'e.g. 12345678',
             icon: Icons.numbers,
@@ -354,7 +458,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 (o, n) => n.copyWith(text: n.text.toUpperCase()),
               ),
             ],
-          ),
+          )),
         ],
       ),
     );
@@ -451,18 +555,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
           const FieldLabel('Caregiving Experience (Years)'),
           Row(
             children: [
-              Expanded(
-                child: Slider(
-                  value: _years,
-                  min: 0,
-                  max: 5,
-                  divisions: 5,
-                  label: _yearsLabel,
-                  onChanged: (v) => setState(() => _years = v),
-                ),
+              IconButton.outlined(
+                tooltip: 'Fewer years',
+                onPressed: _years > 0 ? () => setState(() => _years--) : null,
+                icon: const Icon(Icons.remove),
               ),
               Container(
-                width: 56,
+                width: 72,
+                margin: const EdgeInsets.symmetric(horizontal: 10),
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
@@ -470,23 +570,37 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  _yearsLabel,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primaryDark,
-                  ),
+                  '$_years',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.primaryDark),
+                ),
+              ),
+              IconButton.outlined(
+                tooltip: 'More years',
+                onPressed: _years < _maxYears ? () => setState(() => _years++) : null,
+                icon: const Icon(Icons.add),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _years == 0 ? 'New to caregiving' : '$_years year${_years == 1 ? '' : 's'} of paid caregiving work',
+                  style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
                 ),
               ),
             ],
           ),
-          _subTitle('Certificate of Good Conduct'),
+          _subTitle('Certificate of Good Conduct (required)'),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Families need this before hiring. Apply on eCitizen (DCI) if you do not have a valid one.',
+              style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+            ),
+          ),
           AppTextField(
             label: 'Reference Number',
             hint: 'Police clearance reference',
             controller: _conductRefCtrl,
-            validator: (v) => _groupRequired(
-                v, _conductGroup, 'Enter the reference number'),
+            validator: (v) => _required(v, 'Enter the reference number'),
             textInputAction: TextInputAction.next,
             textCapitalization: TextCapitalization.characters,
           ),
@@ -495,8 +609,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
             label: 'Issuing Authority',
             hint: 'e.g. Directorate of Criminal Investigations',
             controller: _conductAuthCtrl,
-            validator: (v) => _groupRequired(
-                v, _conductGroup, 'Enter the issuing authority'),
+            validator: (v) => _required(v, 'Enter the issuing authority'),
             textInputAction: TextInputAction.next,
             textCapitalization: TextCapitalization.words,
           ),
@@ -504,12 +617,19 @@ class _DetailsScreenState extends State<DetailsScreen> {
           AppDateField(
             label: 'Expiry Date',
             controller: _conductExpiryCtrl,
-            validator: (v) => _validateExpiry(v, _conductGroup),
+            validator: (v) => _validateExpiry(v, _conductGroup, required: true),
             firstDate: today,
             lastDate: far,
             initialDate: today,
           ),
           _subTitle('Professional License / Certification'),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Needed only if you hold a Nursing Council licence; you will upload it with your documents.',
+              style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+            ),
+          ),
           AppTextField(
             label: 'License Number',
             hint: 'e.g. nursing or caregiver registration ID',
@@ -550,11 +670,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
         children: [
           _cardTitle(Icons.history_edu_outlined, 'Work History'),
           if (_work.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Add places you have worked and what you did there.',
-                style: TextStyle(fontSize: 15, color: AppColors.textMuted),
+                _years > 0
+                    ? 'Required: add at least one place you have worked and what you did there.'
+                    : 'Add places you have worked and what you did there (optional while you are new).',
+                style: TextStyle(fontSize: 15, color: _years > 0 ? AppColors.error : AppColors.textMuted),
               ),
             ),
           for (var i = 0; i < _work.length; i++) _workEntryCard(i),
@@ -693,11 +815,12 @@ class _DetailsScreenState extends State<DetailsScreen> {
               children: [
                 const OnboardingAppBar(),
                 const SizedBox(height: 8),
-                const OnboardingStepper(currentStep: 2, label: 'Details'),
+                if (!widget.editMode) const OnboardingStepper(currentStep: 2, label: 'Details'),
                 const SizedBox(height: 24),
-                const Text(
-                  'Personal & Professional Details',
-                  style: TextStyle(
+                if (_prefilling) const LinearProgressIndicator(),
+                Text(
+                  widget.editMode ? 'Edit Your Details' : 'Personal & Professional Details',
+                  style: const TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
                     color: AppColors.textDark,
@@ -746,7 +869,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                     const SizedBox(width: 16),
                     Expanded(
                       child: PrimaryButton(
-                        label: 'Next Step',
+                        label: widget.editMode ? 'Save Changes' : 'Next Step',
                         trailingIcon: Icons.arrow_forward,
                         isLoading: _loading,
                         onPressed: _submit,

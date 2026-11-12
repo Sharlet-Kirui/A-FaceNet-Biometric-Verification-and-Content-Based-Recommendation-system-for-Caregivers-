@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../core/api_config.dart';
+import '../core/privacy_notice.dart';
 import 'api_client.dart';
 import 'models.dart';
 
@@ -22,6 +23,18 @@ abstract class OnboardingService {
   /// Skill options from the platform vocabulary, keyed by
   /// 'specialization', 'technical' and 'language'.
   Future<Map<String, List<String>>> loadSkillOptions();
+
+  /// GET /caregivers/me: everything the edit screens need, including
+  /// `identity_locked` (date of birth, nationality and ID cannot change).
+  Future<Map<String, dynamic>> loadMyProfile();
+
+  /// Documents this caregiver must upload: identity, good_conduct, cv, and
+  /// license for Nursing Council licence holders.
+  Future<List<String>> requiredDocuments();
+
+  /// Document types already on the open submission (e.g. when retaking one photo),
+  /// so they need not be picked again. Empty when there is no open submission.
+  Future<List<String>> uploadedDocuments();
 
   /// Skill vector inputs: specializations, technical skills, languages,
   /// availability (including user-added entries).
@@ -76,6 +89,9 @@ class ApiOnboardingService implements OnboardingService {
       'fullName': fullName,
       'email': email,
       'password': password,
+      // only reachable after the Privacy Notice box is ticked on Create Account
+      'acceptPrivacy': true,
+      'privacyVersion': kPrivacyVersion,
     });
     _logDevCode(body);
   }
@@ -92,8 +108,8 @@ class ApiOnboardingService implements OnboardingService {
     _logDevCode(body);
   }
 
-  /// Email sending is not wired yet: in development the API returns the code,
-  /// which is printed to the flutter run console (and the Node console).
+  /// In development the API also returns the emailed code; it is printed to the
+  /// flutter run console (never in release builds or when the API runs in production).
   void _logDevCode(Map<String, dynamic> body) {
     if (kDebugMode && body['devOtp'] != null) debugPrint('[dev] email code: ${body['devOtp']}');
   }
@@ -116,7 +132,29 @@ class ApiOnboardingService implements OnboardingService {
       'specialization': names('specialization'),
       'technical': names('technical'),
       'language': names('language'),
+      'certification': names('certification'),
     };
+  }
+
+  @override
+  Future<Map<String, dynamic>> loadMyProfile() => _api.get('/caregivers/me');
+
+  @override
+  Future<List<String>> requiredDocuments() async {
+    final body = await _api.get('/kyc/requirements');
+    return [for (final d in (body['required'] as List? ?? const [])) '$d'];
+  }
+
+  @override
+  Future<List<String>> uploadedDocuments() async {
+    try {
+      final body = await _api.get('/kyc/submissions/latest');
+      if (body['status'] == 'rejected' || body['status'] == 'approved') return const [];
+      return [for (final d in (body['documents'] as List? ?? const [])) '$d'];
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return const []; // no submission yet
+      rethrow;
+    }
   }
 
   @override
@@ -240,8 +278,34 @@ class MockOnboardingService implements OnboardingService {
       'specialization': ['Elderly Care', "Dementia & Alzheimer's Care", 'Child & Newborn Care'],
       'technical': ['Wound Dressing', 'Medication Administration', 'Vital Signs Monitoring'],
       'language': ['English', 'Kiswahili'],
+      'certification': ['CPR Certified', 'Nursing Council Licence'],
     };
   }
+
+  @override
+  Future<Map<String, dynamic>> loadMyProfile() async => {
+        'first_name': 'Grace', 'last_name': 'Wanjiku', 'date_of_birth': '1994-03-12', 'gender': 'female',
+        'phone': '+254712345678', 'nationality': 'Kenyan', 'id_type': 'national_id', 'id_number': '30123456',
+        'street': 'Ngong Rd', 'town': 'Kilimani', 'county': 'Nairobi', 'postal_code': '00100', 'country': 'Kenya',
+        'experience_years': 4, 'identity_locked': true,
+        'credentials': [
+          {'credential_type': 'police_clearance', 'reference_number': 'PC-123', 'issuing_authority': 'DCI', 'expiry_date': '2027-06-30'},
+        ],
+        'work_history': [
+          {'employer': 'Sunrise Home', 'role': 'Caregiver', 'duties': 'Daily care', 'from_year': 2021, 'to_year': null},
+        ],
+        'skills': [
+          {'skill_name': "Dementia & Alzheimer's Care", 'category': 'specialization'},
+          {'skill_name': 'English', 'category': 'language'},
+        ],
+        'shifts': ['morning', 'afternoon'],
+      };
+
+  @override
+  Future<List<String>> requiredDocuments() async => const ['identity', 'good_conduct', 'cv'];
+
+  @override
+  Future<List<String>> uploadedDocuments() async => const [];
 
   @override
   Future<void> submitSpecialties(Map<String, List<String>> specialties) => _delay();
