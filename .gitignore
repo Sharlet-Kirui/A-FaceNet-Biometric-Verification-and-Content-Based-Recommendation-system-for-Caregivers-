@@ -13,3 +13,4 @@ ml_eval/ocr_data/
 __pycache__/
 .pytest_cache/
 hs_err_pid*.log
+.vscode/
