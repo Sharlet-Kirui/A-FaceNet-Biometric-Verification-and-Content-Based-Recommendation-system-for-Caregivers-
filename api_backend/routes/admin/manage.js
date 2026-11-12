@@ -1,4 +1,6 @@
 // Caregivers, system settings, analytics, audit log and the skill vocabulary.
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const db = require('../../db');
 const { requireSuperAdmin } = require('../../middleware/adminAuth');
@@ -57,8 +59,10 @@ router.get('/caregivers/:id', wrap(async (req, res) => {
                 FROM kyc_submissions s LEFT JOIN verification_reports r USING (submission_id)
                WHERE s.caregiver_id = $1 ORDER BY s.attempt_number DESC`, [id]),
     db.query('SELECT score, is_verified, badge_issued_at, valid_until FROM trust_scores WHERE caregiver_id = $1', [id]),
-    db.query(`SELECT m.job_id, j.title, j.status, m.match_score, m.matched_at FROM job_matches m JOIN job_postings j USING (job_id)
-               WHERE m.caregiver_id = $1 AND m.status = 'interested' ORDER BY m.matched_at DESC`, [id]),
+    db.query(`SELECT m.job_id, j.title, j.status, m.status AS applicant_status, m.match_score, m.matched_at
+                FROM job_matches m JOIN job_postings j USING (job_id)
+               WHERE m.caregiver_id = $1 AND m.status IN ('interested', 'shortlisted', 'declined')
+               ORDER BY m.matched_at DESC`, [id]),
   ]);
   const t = trust.rows[0];
   res.json({
@@ -74,8 +78,30 @@ router.get('/caregivers/:id', wrap(async (req, res) => {
     submissions: submissions.rows.map((s) => ({ submissionId: s.submission_id, attemptNumber: s.attempt_number,
       status: s.status, submittedAt: s.submitted_at, trustScore: num(s.overall_confidence) })),
     interests: interests.rows.map((i) => ({ jobId: i.job_id, title: i.title, jobStatus: i.status,
+      applicantStatus: i.applicant_status,
       matchScore: num(i.match_score), interestedAt: i.matched_at })),
   });
+}));
+
+// DELETE /admin/caregivers/:id  { reason }  (super admin)
+// Right to erasure (Privacy Notice): removes the account and everything linked to it
+// (documents, face data, reports, matches, notifications) and the uploaded files.
+// The audit log keeps only that an account was deleted, by whom and why.
+const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads'));
+router.delete('/caregivers/:id', requireSuperAdmin, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Caregiver not found' });
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 5) return res.status(400).json({ error: 'Give the reason (e.g. "Deletion requested by the caregiver by email")' });
+  const deleted = await db.transaction(async (c) => {
+    const { rowCount } = await c.query('DELETE FROM caregivers WHERE caregiver_id = $1', [req.params.id]);
+    if (!rowCount) return false;
+    await audit(c, req, { actionType: 'caregiver_deleted', details: { caregiverId: req.params.id, reason } });
+    return true;
+  });
+  if (!deleted) return res.status(404).json({ error: 'Caregiver not found' });
+  const folder = path.join(UPLOAD_ROOT, req.params.id);
+  if (folder.startsWith(UPLOAD_ROOT + path.sep)) fs.rmSync(folder, { recursive: true, force: true });
+  res.status(204).end();
 }));
 
 // ---------------------------------------------------------------- skill vocabulary (job form)
@@ -90,7 +116,7 @@ const SETTING_RANGES = {
   weight_face: [0, 1], weight_ocr: [0, 1], weight_iprs: [0, 1],
   trust_threshold: [0, 1], face_distance_threshold: [0.1, 2], blur_threshold: [0, 1000],
   liveness_min_turn_ratio: [0.05, 1.5], liveness_same_person_threshold: [0.1, 2],
-  liveness_nonce_ttl_seconds: [30, 600], liveness_enforced: [0, 1],
+  liveness_nonce_ttl_seconds: [30, 600], liveness_enforced: [0, 1], iprs_enforced: [0, 1],
 };
 
 router.get('/settings', wrap(async (req, res) => {
@@ -112,7 +138,7 @@ router.put('/settings', requireSuperAdmin, wrap(async (req, res) => {
     const n = Number(v);
     if (!range) errors[k] = 'not editable';
     else if (!Number.isFinite(n) || n < range[0] || n > range[1]) errors[k] = `between ${range[0]} and ${range[1]}`;
-    else if (k === 'liveness_enforced' && ![0, 1].includes(n)) errors[k] = '0 or 1';
+    else if (['liveness_enforced', 'iprs_enforced'].includes(k) && ![0, 1].includes(n)) errors[k] = '0 or 1';
   }
   if (Object.keys(errors).length) return res.status(400).json({ error: 'Validation failed', fields: errors });
 
@@ -160,7 +186,7 @@ router.get('/analytics', wrap(async (req, res) => {
                      (SELECT count(*) FROM caregivers WHERE onboarding_status = 'verified')::int AS verified,
                      (SELECT count(*) FROM kyc_submissions WHERE status = 'flagged')::int AS awaiting_review,
                      (SELECT count(*) FROM job_postings WHERE status = 'open')::int AS open_jobs,
-                     (SELECT count(*) FROM job_matches WHERE status = 'interested')::int AS interests,
+                     (SELECT count(*) FROM job_matches WHERE status IN ('interested', 'shortlisted', 'declined'))::int AS interests,
                      (SELECT avg(score) FROM trust_scores WHERE is_verified) AS avg_verified_trust`),
   ]);
   const bins = Array.from({ length: 10 }, (_, i) => ({ range: `${(i / 10).toFixed(1)}-${((i + 1) / 10).toFixed(1)}`, count: 0, verified: 0 }));
