@@ -50,6 +50,25 @@ async function ownSubmission(caregiverId, submissionId) {
 }
 const isUuid = (s) => /^[0-9a-f-]{36}$/i.test(s || '');
 
+// Documents every caregiver must upload before the selfie step. The professional licence is
+// required only from caregivers who list the Nursing Council licence among their certifications.
+const LICENSED_SKILLS = ['nursing council licence', 'nursing council license'];
+async function requiredDocuments(caregiverId) {
+  const { rows } = await db.query(
+    `SELECT 1 FROM caregiver_skills cs JOIN skill_tags t USING (skill_tag_id)
+      WHERE cs.caregiver_id = $1 AND lower(t.skill_name) = ANY($2) LIMIT 1`, [caregiverId, LICENSED_SKILLS]);
+  return ['identity', 'good_conduct', 'cv', ...(rows.length ? ['license'] : [])];
+}
+
+/** Required documents not yet uploaded to this submission ('identity' = ID front and back, or passport). */
+async function missingDocuments(caregiverId, submissionId) {
+  const required = await requiredDocuments(caregiverId);
+  const { rows } = await db.query('SELECT doc_type FROM kyc_documents WHERE submission_id = $1', [submissionId]);
+  const have = new Set(rows.map((r) => r.doc_type));
+  const idComplete = have.has('passport') || (have.has('id_front') && have.has('id_back'));
+  return required.filter((d) => (d === 'identity' ? !idComplete : !have.has(d)));
+}
+
 async function saveDocs(caregiverId, submissionId, files, mapType) {
   for (const f of files) {
     const docType = mapType(f.fieldname);
@@ -100,14 +119,19 @@ router.post('/submissions/:id/documents', requireAuth,
     const { rows } = await db.query('SELECT doc_type FROM kyc_documents WHERE submission_id = $1', [req.params.id]);
     const have = new Set(rows.map((r) => r.doc_type));
     const idComplete = have.has('passport') || (have.has('id_front') && have.has('id_back'));
-    if (idComplete) await advanceStatus(db, req.caregiverId, 'documents_uploaded');
-    res.json({ uploaded: types, documents: [...have], idComplete });
+    const missing = await missingDocuments(req.caregiverId, req.params.id);
+    if (missing.length === 0) await advanceStatus(db, req.caregiverId, 'documents_uploaded');
+    res.json({ uploaded: types, documents: [...have], idComplete, missing });
   }));
 
 // POST /kyc/submissions/:id/liveness-challenge  -> { nonce, challenge, expiresInSeconds }
 router.post('/submissions/:id/liveness-challenge', requireAuth, wrap(async (req, res) => {
   if (!isUuid(req.params.id) || !(await ownSubmission(req.caregiverId, req.params.id))) {
     return res.status(404).json({ error: 'Submission not found' });
+  }
+  const missing = await missingDocuments(req.caregiverId, req.params.id);
+  if (missing.length) {
+    return res.status(400).json({ error: 'Upload the required documents before the selfie', reason: 'documents_missing', missing });
   }
   const settings = await loadSettings(db);
   const nonce = crypto.randomBytes(16).toString('hex');
@@ -172,6 +196,11 @@ router.post('/submissions/:id/verify', requireAuth, wrap(async (req, res) => {
     if (/required/.test(err.message)) return res.status(400).json({ error: err.message });
     throw err;
   }
+}));
+
+// GET /kyc/requirements  -> which documents this caregiver must upload
+router.get('/requirements', requireAuth, wrap(async (req, res) => {
+  res.json({ required: await requiredDocuments(req.caregiverId) });
 }));
 
 // GET /kyc/submissions/latest  -> the caregiver's most recent submission

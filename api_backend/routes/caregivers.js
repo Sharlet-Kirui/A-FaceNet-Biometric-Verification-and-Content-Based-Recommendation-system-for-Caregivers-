@@ -2,7 +2,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { encryptId, hashId } = require('../services/idCrypto');
+const { encryptId, decryptId, hashId } = require('../services/idCrypto');
 const { advanceStatus } = require('../services/onboarding');
 
 const router = express.Router();
@@ -11,6 +11,10 @@ const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 const GENDERS = { 'female': 'female', 'male': 'male', 'other': 'other', 'prefer not to say': 'prefer_not_to_say',
   'prefer_not_to_say': 'prefer_not_to_say' };
 const ID_TYPES = { 'national id': 'national_id', 'national_id': 'national_id', 'passport': 'passport' };
+// Once the selfie step has run, identity fields are what was verified: changing them would
+// invalidate the decision, so they can only change through a new application.
+const IDENTITY_LOCKED = ['liveness_done', 'under_review', 'verified'];
+
 const clean = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
 
 // App labels that differ from the database vocabulary (skill_tags.skill_name)
@@ -41,15 +45,32 @@ router.get('/skill-tags', wrap(async (req, res) => {
 router.get('/caregivers/me', requireAuth, wrap(async (req, res) => {
   const { rows } = await db.query(
     `SELECT caregiver_id, first_name, last_name, email, phone, to_char(date_of_birth, 'YYYY-MM-DD') AS date_of_birth, gender, nationality, id_type,
-            street, town, county, postal_code, country, experience_years, onboarding_status, email_verified_at
+            id_number_encrypted, street, town, county, postal_code, country, experience_years, onboarding_status, email_verified_at
        FROM caregivers WHERE caregiver_id = $1`, [req.caregiverId]);
   if (!rows[0]) return res.status(404).json({ error: 'Caregiver not found' });
-  const skills = await db.query(
-    `SELECT t.skill_name, t.category, cs.proficiency_level FROM caregiver_skills cs
-       JOIN skill_tags t USING (skill_tag_id) WHERE cs.caregiver_id = $1 ORDER BY t.category, t.skill_name`,
-    [req.caregiverId]);
-  const trust = await db.query('SELECT score, is_verified FROM trust_scores WHERE caregiver_id = $1', [req.caregiverId]);
-  res.json({ ...rows[0], skills: skills.rows, trust: trust.rows[0] || null });
+  const { id_number_encrypted: enc, ...me } = rows[0];
+  let idNumber = null;
+  try { idNumber = enc ? decryptId(enc) : null; } catch { idNumber = null; }
+  const [skills, trust, credentials, work, shifts] = await Promise.all([
+    db.query(`SELECT t.skill_name, t.category, cs.proficiency_level FROM caregiver_skills cs
+                JOIN skill_tags t USING (skill_tag_id) WHERE cs.caregiver_id = $1 ORDER BY t.category, t.skill_name`, [req.caregiverId]),
+    db.query('SELECT score, is_verified FROM trust_scores WHERE caregiver_id = $1', [req.caregiverId]),
+    db.query(`SELECT credential_type, reference_number, issuing_authority, to_char(expiry_date, 'YYYY-MM-DD') AS expiry_date, status
+                FROM caregiver_credentials WHERE caregiver_id = $1`, [req.caregiverId]),
+    db.query(`SELECT employer, role, duties, from_year, to_year FROM work_history WHERE caregiver_id = $1
+               ORDER BY from_year DESC`, [req.caregiverId]),
+    db.query('SELECT DISTINCT shift FROM caregiver_availability WHERE caregiver_id = $1', [req.caregiverId]),
+  ]);
+  res.json({
+    ...me,
+    id_number: idNumber, // the caregiver's own number, for the edit screen
+    identity_locked: IDENTITY_LOCKED.includes(me.onboarding_status),
+    skills: skills.rows,
+    trust: trust.rows[0] || null,
+    credentials: credentials.rows,
+    work_history: work.rows,
+    shifts: shifts.rows.map((r) => r.shift),
+  });
 }));
 
 // PUT /caregivers/me/details  (payload of details_screen.dart)
@@ -65,9 +86,34 @@ router.put('/caregivers/me/details', requireAuth, wrap(async (req, res) => {
   if (!idNumber || !/^[A-Z0-9]{5,20}$/.test(idNumber)) errors.idNumber = '5-20 letters or numbers';
   if (!clean(b.nationality)) errors.nationality = 'required';
   if (!clean(b.address?.county)) errors.county = 'required';
+  const experience = Number(b.experienceYears);
+  if (!Number.isInteger(experience) || experience < 0 || experience > 60) errors.experienceYears = 'whole years, 0-60';
+  // Certificate of Good Conduct: compulsory for household work
+  const pc = b.policeClearance || {};
+  if (!clean(pc.referenceNumber)) errors.policeClearance = 'certificate of good conduct reference number is required';
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(pc.expiryDate || '')) errors.policeClearance = 'expiry date (YYYY-MM-DD) is required';
+  else if (new Date(pc.expiryDate) <= new Date()) errors.policeClearance = 'the certificate has expired: renew it on eCitizen';
+  // Work history: at least one entry when the caregiver reports experience
+  const work = (Array.isArray(b.workHistory) ? b.workHistory : [])
+    .filter((w) => clean(w.employer) && clean(w.role) && Number(w.fromYear));
+  if (Number.isInteger(experience) && experience > 0 && work.length === 0) {
+    errors.workHistory = 'add at least one previous job (you reported experience)';
+  }
   if (Object.keys(errors).length) return res.status(400).json({ error: 'Validation failed', fields: errors });
 
   const nationality = clean(b.nationality);
+  const current = (await db.query(
+    `SELECT onboarding_status, to_char(date_of_birth, 'YYYY-MM-DD') AS dob, id_type, nationality, id_number_hash
+       FROM caregivers WHERE caregiver_id = $1`, [req.caregiverId])).rows[0];
+  if (current && IDENTITY_LOCKED.includes(current.onboarding_status)) {
+    const changed = current.dob !== b.dateOfBirth || current.id_type !== idType || current.nationality !== nationality
+      || current.id_number_hash !== hashId(idType, nationality, idNumber);
+    if (changed) {
+      return res.status(409).json({
+        error: 'Your date of birth, nationality and ID cannot be changed after verification. Contact support if they are wrong.',
+        reason: 'identity_locked' });
+    }
+  }
   try {
     await db.transaction(async (c) => {
       await c.query(
@@ -78,23 +124,27 @@ router.put('/caregivers/me/details', requireAuth, wrap(async (req, res) => {
         [req.caregiverId, b.dateOfBirth, clean(b.phone), gender, nationality, idType, encryptId(idNumber),
           hashId(idType, nationality, idNumber), clean(b.address?.street), clean(b.address?.town),
           clean(b.address?.county), clean(b.address?.postalCode), clean(b.address?.country),
-          Number.isInteger(b.experienceYears) ? b.experienceYears : null]);
+          experience]);
 
       for (const [key, type] of [['policeClearance', 'police_clearance'], ['professionalLicense', 'professional_license']]) {
-        await c.query('DELETE FROM caregiver_credentials WHERE caregiver_id = $1 AND credential_type = $2', [req.caregiverId, type]);
         const cr = b[key] || {};
         const ref = clean(cr.referenceNumber ?? cr.licenseNumber);
+        const old = (await c.query(
+          'SELECT reference_number, status FROM caregiver_credentials WHERE caregiver_id = $1 AND credential_type = $2',
+          [req.caregiverId, type])).rows[0];
+        await c.query('DELETE FROM caregiver_credentials WHERE caregiver_id = $1 AND credential_type = $2', [req.caregiverId, type]);
         if (ref) {
+          // an unchanged reference keeps the status an administrator gave it
+          const status = old && old.reference_number === ref ? old.status : 'pending';
           await c.query(
-            `INSERT INTO caregiver_credentials (caregiver_id, credential_type, reference_number, issuing_authority, expiry_date)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [req.caregiverId, type, ref, clean(cr.issuingAuthority), clean(cr.expiryDate)]);
+            `INSERT INTO caregiver_credentials (caregiver_id, credential_type, reference_number, issuing_authority, expiry_date, status)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [req.caregiverId, type, ref, clean(cr.issuingAuthority), clean(cr.expiryDate), status]);
         }
       }
 
       await c.query('DELETE FROM work_history WHERE caregiver_id = $1', [req.caregiverId]);
-      for (const w of Array.isArray(b.workHistory) ? b.workHistory : []) {
-        if (!clean(w.employer) || !clean(w.role) || !Number(w.fromYear)) continue;
+      for (const w of work) {
         await c.query(
           `INSERT INTO work_history (caregiver_id, employer, role, duties, from_year, to_year) VALUES ($1,$2,$3,$4,$5,$6)`,
           [req.caregiverId, clean(w.employer), clean(w.role), clean(w.duties), Number(w.fromYear),
@@ -111,10 +161,11 @@ router.put('/caregivers/me/details', requireAuth, wrap(async (req, res) => {
   res.json({ message: 'Details saved' });
 }));
 
-// PUT /caregivers/me/specialties  { specializations, technicalSkills, languages, availability }
+// PUT /caregivers/me/specialties  { specializations, technicalSkills, languages, certifications, availability }
 router.put('/caregivers/me/specialties', requireAuth, wrap(async (req, res) => {
   const b = req.body || {};
-  const groups = [['specialization', b.specializations], ['technical', b.technicalSkills], ['language', b.languages]];
+  const groups = [['specialization', b.specializations], ['technical', b.technicalSkills], ['language', b.languages],
+    ['certification', b.certifications]];
   const unknownShifts = [];
   await db.transaction(async (c) => {
     await c.query('DELETE FROM caregiver_skills WHERE caregiver_id = $1', [req.caregiverId]);
