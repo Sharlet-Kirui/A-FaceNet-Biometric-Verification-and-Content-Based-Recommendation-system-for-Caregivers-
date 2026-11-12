@@ -3,3 +3,13 @@ venv/
 .venv/
 __pycache__/
 .env
+ml_microservice/pair_distances.csv
+# real ID photos and selfies from testing
+api_backend/uploads/
+# volunteers' registry records and ID photos
+ml_microservice/mock_iprs.local.json
+ml_eval/ocr_data/
+# Python and JVM leftovers
+__pycache__/
+.pytest_cache/
+hs_err_pid*.log
