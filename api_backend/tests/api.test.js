@@ -43,6 +43,7 @@ fakeMl.post('/iprs/lookup', express.json(), (req, res) => {
 });
 
 let api; let mlServer; let apiServer;
+const PRIVACY = { acceptPrivacy: true, privacyVersion: '1.0' };
 const created = [];
 const tmpImg = path.join(os.tmpdir(), `kyc-test-${process.pid}.jpg`);
 
@@ -85,7 +86,7 @@ const upload = (url, form, token) => fetch(api + url, { method: 'POST', body: fo
 
 async function onboard() {
   const email = `test.${Date.now()}.${Math.random().toString(36).slice(2, 7)}@example.com`;
-  let r = await json('POST', '/auth/register', { fullName: 'Grace Wanjiku', email, password: 'Str0ng!Pass' });
+  let r = await json('POST', '/auth/register', { fullName: 'Grace Wanjiku', email, password: 'Str0ng!Pass', ...PRIVACY });
   assert.equal(r.status, 201);
   const reg = await r.json();
   created.push(reg.caregiverId);
@@ -140,10 +141,10 @@ test('health endpoints', async () => {
 });
 
 test('register rejects a weak password and a duplicate email', async () => {
-  let r = await json('POST', '/auth/register', { fullName: 'A B', email: 'weak@example.com', password: 'weak' });
+  let r = await json('POST', '/auth/register', { fullName: 'A B', email: 'weak@example.com', password: 'weak', ...PRIVACY });
   assert.equal(r.status, 400);
   const { email } = await onboard();
-  r = await json('POST', '/auth/register', { fullName: 'A B', email: email.toUpperCase(), password: 'Str0ng!Pass' });
+  r = await json('POST', '/auth/register', { fullName: 'A B', email: email.toUpperCase(), password: 'Str0ng!Pass', ...PRIVACY });
   assert.equal(r.status, 409, 'lower(email) uniqueness');
 });
 
@@ -181,8 +182,7 @@ test('full flow: genuine caregiver is approved and everything is stored', async 
   assert.equal(audit.rows[0].n, 1);
   const status = await (await json('GET', `/kyc/submissions/${sid}`, null, token)).json();
   assert.equal(status.status, 'approved');
-  const latestRes = await json('GET', '/kyc/submissions/latest', null, token);
-  const latest = await latestRes.json();
+  const latest = await (await json('GET', '/kyc/submissions/latest', null, token)).json();
   assert.equal(latest.submission_id, sid, 'latest returns the newest submission');
   assert.equal(me.date_of_birth, '1994-03-12', 'date not shifted by timezone');
 
@@ -234,7 +234,8 @@ test('a second account cannot reuse the same ID number', async () => {
   const b = await onboard();
   const idNumber = String(Math.floor(10000000 + Math.random() * 89999999));
   const payload = { dateOfBirth: '1994-03-12', nationality: 'Kenyan', idType: 'National ID', idNumber,
-    address: { county: 'Nairobi' } };
+    address: { county: 'Nairobi' }, experienceYears: 0,
+    policeClearance: { referenceNumber: 'PC-9', issuingAuthority: 'DCI', expiryDate: '2030-01-01' } };
   assert.equal((await json('PUT', '/caregivers/me/details', payload, a.token)).status, 200);
   const r = await json('PUT', '/caregivers/me/details', payload, b.token);
   assert.equal(r.status, 409, 'HMAC hash uniqueness');
@@ -264,4 +265,24 @@ test('ID text that does not match the typed details lowers the score and asks fo
   assert.equal(Number(rep.rows[0].ocr_score), 0.1);
   assert.equal(rep.rows[0].report_details.ocr.idNumber.found, '*****456', 'only the masked number is stored');
   ocrMode = 'match';
+});
+
+test('registry switched off: a registry mismatch no longer blocks, and the report says not checked', async () => {
+  const db = require('../db');
+  await db.query(`UPDATE system_settings SET value = 0 WHERE setting_key = 'iprs_enforced'`);
+  try {
+    livenessMode = 'pass'; iprsMode = 'mismatch'; faceDistance = 0.55; ocrMode = 'match';
+    const { token, sid } = await onboard();
+    const result = await (await challengeAndSelfie(token, sid)).r.json();
+    assert.equal(result.decision, 'approved', JSON.stringify(result));
+    assert.ok(result.reasons.includes('iprs_not_checked'));
+    const rep = await db.query('SELECT iprs_verification_status FROM verification_reports WHERE submission_id = $1', [sid]);
+    assert.equal(rep.rows[0].iprs_verification_status, 'not_checked');
+    const notes = await (await json('GET', '/notifications', null, token)).json();
+    assert.equal(notes.unread, 1);
+    assert.equal(notes.notifications[0].type, 'verification_approved');
+  } finally {
+    await db.query(`UPDATE system_settings SET value = 1 WHERE setting_key = 'iprs_enforced'`);
+    iprsMode = 'verified';
+  }
 });
