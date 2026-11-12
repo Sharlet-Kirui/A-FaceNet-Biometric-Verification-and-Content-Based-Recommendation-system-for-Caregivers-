@@ -148,7 +148,11 @@ async function main() {
     await q(`TRUNCATE job_matches, job_skill_requirements, job_postings, job_categories,
              audit_logs, trust_scores, verification_reports, face_embeddings, kyc_documents,
              kyc_submissions, work_history, caregiver_credentials, caregiver_availability,
-             caregiver_skills, caregiver_skill_vectors, email_otps, skill_tags, caregivers, admins CASCADE`);
+             caregiver_skills, caregiver_skill_vectors, email_otps, skill_tags, caregivers CASCADE`);
+    // DELETE, not TRUNCATE ... CASCADE: system_settings.updated_by refers to admins, and a
+    // cascading truncate would empty system_settings (weights and thresholds) as well.
+    await q('UPDATE system_settings SET updated_by = NULL');
+    await q('DELETE FROM admins');
 
     // ---- skill tags
     const tagId = {}; // `${category}:${name}` -> uuid
